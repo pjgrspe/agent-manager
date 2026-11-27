@@ -1,4 +1,4 @@
-import type { PlanItem, ProjectState, ProjectStatusData, VerifyHealth } from "./types.ts";
+import type { ManagedProject, PlanItem, ProjectState, ProjectStatusData, VerifyHealth } from "./types.ts";
 
 const VALID_STATES: ReadonlySet<ProjectState> = new Set([
   "Active",
@@ -162,4 +162,17 @@ export function buildAutoRecapStatus(
     plan: existing.plan,
     blockers: existing.blockers,
   };
+}
+
+export function isProjectBlocked(project: Pick<ManagedProject, "status">): boolean {
+  return project.status.state === "Blocked" || project.status.blockers.length > 0;
+}
+
+export function matchesStateFilter(
+  project: Pick<ManagedProject, "status">,
+  filter: "ControlCenter" | "All" | ProjectState,
+): boolean {
+  if (filter === "All" || filter === "ControlCenter") return true;
+  if (filter === "Blocked") return isProjectBlocked(project);
+  return project.status.state === filter;
 }

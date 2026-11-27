@@ -43,6 +43,7 @@ export interface ManagedProject {
   id: string;
   name: string;
   path: string;
+  group?: string;
   exists: boolean;
   status: ProjectStatusData;
   git: ProjectGitData;

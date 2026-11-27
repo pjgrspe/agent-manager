@@ -19,10 +19,10 @@ export async function fetchProjects(): Promise<ManagedProject[]> {
   return res.projects;
 }
 
-export async function addProject(path: string, name?: string): Promise<ManagedProject[]> {
+export async function addProject(path: string, name?: string, group?: string): Promise<ManagedProject[]> {
   const res = await requestJson<{ projects: ManagedProject[] }>("/projects", {
     method: "POST",
-    body: JSON.stringify({ path, name }),
+    body: JSON.stringify({ path, name, group }),
   });
   return res.projects;
 }
@@ -42,11 +42,28 @@ export async function previewFolder(rootFolder: string): Promise<ScanCandidate[]
   return res.candidates;
 }
 
-export async function addProjectsBatch(paths: string[]): Promise<{ added: number; projects: ManagedProject[] }> {
+export async function addProjectsBatch(
+  paths: string[],
+  group?: string,
+): Promise<{ added: number; projects: ManagedProject[] }> {
   return requestJson<{ added: number; projects: ManagedProject[] }>("/projects/batch", {
     method: "POST",
-    body: JSON.stringify({ paths }),
+    body: JSON.stringify({ paths, group }),
   });
+}
+
+export async function updateProjectMeta(
+  id: string,
+  meta: { group?: string; name?: string },
+): Promise<ManagedProject[]> {
+  const res = await requestJson<{ projects: ManagedProject[] }>(
+    `/projects/${encodeURIComponent(id)}/meta`,
+    {
+      method: "PUT",
+      body: JSON.stringify(meta),
+    },
+  );
+  return res.projects;
 }
 
 export async function scanFolder(

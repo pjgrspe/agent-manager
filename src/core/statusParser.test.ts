@@ -3,6 +3,8 @@ import { describe, it } from "node:test";
 import {
   buildAutoRecapStatus,
   extractVerifyCommand,
+  isProjectBlocked,
+  matchesStateFilter,
   parseStatusMarkdown,
   serializeStatusMarkdown,
 } from "./statusParser.ts";
@@ -82,5 +84,22 @@ describe("statusParser", () => {
     assert.deepEqual(next.plan, existing.plan);
     assert.equal(next.recap[0], "WIP on main: 2 uncommitted file(s)");
     assert.equal(next.recap[1], "[2026-11-27] Add auth guard (abc1234)");
+  });
+
+  it("matches Blocked filter when a project has blockers even if state is Active", () => {
+    const proj = {
+      status: {
+        state: "Active" as const,
+        updated: "2026-11-27",
+        verify: "Unknown" as const,
+        recap: [],
+        plan: [],
+        blockers: ["Need API key"],
+        hasStatusFile: true,
+      },
+    };
+    assert.equal(isProjectBlocked(proj), true);
+    assert.equal(matchesStateFilter(proj, "Blocked"), true);
+    assert.equal(matchesStateFilter(proj, "Waiting on Review"), false);
   });
 });

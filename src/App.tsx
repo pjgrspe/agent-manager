@@ -34,9 +34,11 @@ import {
   previewFolder,
   removeProject,
   streamProjectExec,
+  updateProjectMeta,
   updateProjectStatus,
   type ScanCandidate,
 } from "./core/api.ts";
+import { isProjectBlocked, matchesStateFilter } from "./core/statusParser.ts";
 import type {
   AgentKind,
   ManagedProject,
@@ -154,6 +156,9 @@ export function App() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [addMode, setAddMode] = useState<"single" | "scan">("scan");
   const [pathInput, setPathInput] = useState("");
+  const [groupInput, setGroupInput] = useState("");
+  const [activeGroup, setActiveGroup] = useState<string | null>(null);
+  const [inspectorGroupDraft, setInspectorGroupDraft] = useState("");
   const [scanCandidates, setScanCandidates] = useState<ScanCandidate[] | null>(null);
   const [selectedCandidates, setSelectedCandidates] = useState<Set<string>>(new Set());
   const [standup, setStandup] = useState<StandupSummary | null>(null);
@@ -246,10 +251,14 @@ export function App() {
     [projects, selectedId],
   );
 
+  useEffect(() => {
+    setInspectorGroupDraft(selectedProject?.group ?? "");
+  }, [selectedProject?.id, selectedProject?.group]);
+
   const stats = useMemo(() => {
     return {
       total: projects.length,
-      blocked: projects.filter((p) => p.status.state === "Blocked" || p.status.blockers.length > 0).length,
+      blocked: projects.filter((p) => isProjectBlocked(p)).length,
       review: projects.filter((p) => p.status.state === "Waiting on Review").length,
       active: projects.filter((p) => p.status.state === "Active").length,
       idle: projects.filter((p) => p.status.state === "Idle").length,
@@ -257,16 +266,46 @@ export function App() {
     };
   }, [projects]);
 
+  const groups = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const p of projects) {
+      if (p.group) {
+        map.set(p.group, (map.get(p.group) ?? 0) + 1);
+      }
+    }
+    return Array.from(map.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+  }, [projects]);
+
   const filteredProjects = useMemo(() => {
     return projects.filter((p) => {
-      if (filter !== "All" && filter !== "ControlCenter" && p.status.state !== filter) return false;
+      if (!matchesStateFilter(p, filter)) return false;
+      if (activeGroup && p.group !== activeGroup) return false;
       if (search.trim()) {
         const q = search.toLowerCase();
-        return p.name.toLowerCase().includes(q) || p.path.toLowerCase().includes(q);
+        return (
+          p.name.toLowerCase().includes(q) ||
+          p.path.toLowerCase().includes(q) ||
+          (p.group ?? "").toLowerCase().includes(q)
+        );
       }
       return true;
     });
-  }, [projects, filter, search]);
+  }, [projects, filter, activeGroup, search]);
+
+  const groupedProjects = useMemo(() => {
+    const map = new Map<string, ManagedProject[]>();
+    for (const p of filteredProjects) {
+      const key = p.group || "Ungrouped";
+      const list = map.get(key) ?? [];
+      list.push(p);
+      map.set(key, list);
+    }
+    return Array.from(map.entries()).sort(([a], [b]) => {
+      if (a === "Ungrouped") return 1;
+      if (b === "Ungrouped") return -1;
+      return a.localeCompare(b);
+    });
+  }, [filteredProjects]);
 
   const heroHeadline = useMemo(() => {
     if (stats.total === 0) return "Add your first repository to start managing projects";
@@ -286,18 +325,29 @@ export function App() {
   const bastionPct = stats.total > 0 ? Math.round((stats.guarded / stats.total) * 100) : 0;
   const activeAgentObj = AGENTS.find((a) => a.id === agent) ?? AGENTS[0]!;
 
+  function inferFolderName(rawPath: string): string {
+    const cleaned = rawPath.trim().replace(/^["']+|["']+$/g, "").replace(/[\\/]+$/, "");
+    const parts = cleaned.split(/[\\/]/).filter(Boolean);
+    return parts[parts.length - 1] ?? "";
+  }
+
   async function handleAddSubmit() {
     if (!pathInput.trim()) return;
     setError(null);
+    const resolvedGroup = groupInput.trim() || undefined;
     try {
       if (addMode === "single") {
-        const updated = await addProject(pathInput.trim());
+        const updated = await addProject(pathInput.trim(), undefined, resolvedGroup);
         setProjects(updated);
-        showToast("Repository added", pathInput.trim());
+        showToast("Repository added", resolvedGroup ? `Group: ${resolvedGroup}` : pathInput.trim());
         setPathInput("");
+        setGroupInput("");
         setShowAddModal(false);
       } else {
         const candidates = await previewFolder(pathInput.trim());
+        if (!groupInput.trim()) {
+          setGroupInput(inferFolderName(pathInput));
+        }
         setScanCandidates(candidates);
         setSelectedCandidates(new Set(candidates.filter((c) => !c.alreadyTracked).map((c) => c.path)));
         if (candidates.length === 0) {
@@ -313,16 +363,33 @@ export function App() {
     const chosen = Array.from(selectedCandidates);
     if (chosen.length === 0) return;
     setError(null);
+    const resolvedGroup = groupInput.trim() || inferFolderName(pathInput) || undefined;
     try {
-      const res = await addProjectsBatch(chosen);
+      const res = await addProjectsBatch(chosen, resolvedGroup);
       setProjects(res.projects);
-      showToast(`Imported ${res.added} repository(s)`);
+      showToast(
+        `Imported ${res.added} repository(s)`,
+        resolvedGroup ? `Grouped under "${resolvedGroup}"` : undefined,
+      );
       setPathInput("");
+      setGroupInput("");
       setScanCandidates(null);
       setSelectedCandidates(new Set());
       setShowAddModal(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to import selected repositories");
+    }
+  }
+
+  async function handleSaveGroup(project: ManagedProject, nextGroup: string) {
+    try {
+      const updated = await updateProjectMeta(project.id, { group: nextGroup });
+      setProjects(updated);
+      showToast(
+        nextGroup.trim() ? `Moved ${project.name} to "${nextGroup.trim()}"` : `Ungrouped ${project.name}`,
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to update group");
     }
   }
 
@@ -443,6 +510,9 @@ export function App() {
     const picked = await window.agentManager.pickFolder();
     if (picked) {
       setPathInput(picked);
+      if (addMode === "scan") {
+        setGroupInput(inferFolderName(picked));
+      }
     }
   }
 
@@ -513,7 +583,10 @@ export function App() {
                   <button
                     key={item.id}
                     className={`nav-item ${isActive ? "active" : ""}`}
-                    onClick={() => setFilter(item.id)}
+                    onClick={() => {
+                      setFilter(item.id);
+                      setActiveGroup(null);
+                    }}
                   >
                     {isActive && (
                       <motion.span
@@ -534,6 +607,35 @@ export function App() {
               })}
             </nav>
           </div>
+
+          {groups.length > 0 && (
+            <div>
+              <div className="rail-section-label">Groups</div>
+              <nav className="rail-nav">
+                {groups.map(([groupName, count]) => {
+                  const isActive = activeGroup === groupName && filter !== "ControlCenter";
+                  return (
+                    <button
+                      key={groupName}
+                      className={`nav-item ${isActive ? "active" : ""}`}
+                      onClick={() => {
+                        setFilter("All");
+                        setActiveGroup((prev) => (prev === groupName ? null : groupName));
+                      }}
+                    >
+                      <span className="nav-content">
+                        <span className="nav-left">
+                          <FolderOpen size={12} color="var(--text-muted)" />
+                          {groupName}
+                        </span>
+                        <span className="nav-count">{count}</span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </nav>
+            </div>
+          )}
 
           <div>
             <div className="rail-section-label">Preferred Agent</div>
@@ -698,104 +800,117 @@ export function App() {
               </div>
             ) : (
               <div className="project-list">
-                <AnimatePresence mode="popLayout">
-                  {filteredProjects.map((project, index) => {
-                    const meta = stateMeta(project.status.state);
-                    const doneCount = project.status.plan.filter((p) => p.done).length;
-                    const totalPlan = project.status.plan.length;
-                    const planPct = totalPlan > 0 ? Math.round((doneCount / totalPlan) * 100) : 0;
-                    const nextPlan = project.status.plan.find((p) => !p.done);
-                    const latestRecap =
-                      project.status.recap[0] ??
-                      project.git.recentCommits[0]?.subject ??
-                      "Click Sync Recap to pull latest Git activity";
+                {groupedProjects.map(([groupName, groupItems]) => (
+                  <div key={groupName} className="group-section">
+                    {(groupedProjects.length > 1 || groupName !== "Ungrouped") && (
+                      <div className="group-header">
+                        <span className="group-header-left">
+                          <FolderOpen size={12} />
+                          {groupName}
+                        </span>
+                        <span className="nav-count">{groupItems.length}</span>
+                      </div>
+                    )}
+                    <AnimatePresence mode="popLayout">
+                      {groupItems.map((project, index) => {
+                        const meta = stateMeta(project.status.state);
+                        const doneCount = project.status.plan.filter((p) => p.done).length;
+                        const totalPlan = project.status.plan.length;
+                        const planPct = totalPlan > 0 ? Math.round((doneCount / totalPlan) * 100) : 0;
+                        const nextPlan = project.status.plan.find((p) => !p.done);
+                        const latestRecap =
+                          project.status.recap[0] ??
+                          project.git.recentCommits[0]?.subject ??
+                          "Click Sync Recap to pull latest Git activity";
 
-                    return (
-                      <motion.article
-                        layout
-                        key={project.id}
-                        initial={{ opacity: 0, y: 12, scale: 0.99 }}
-                        animate={{ opacity: 1, y: 0, scale: 1 }}
-                        exit={{ opacity: 0, scale: 0.97 }}
-                        transition={{
-                          ...SPRING_SMOOTH,
-                          delay: Math.min(index * 0.035, 0.2),
-                        }}
-                        whileHover={{ y: -1 }}
-                        className={`project-card ${meta.row} ${
-                          selectedId === project.id ? "selected" : ""
-                        }`}
-                        onClick={() => setSelectedId(project.id)}
-                      >
-                        <ProgressRing
-                          percent={totalPlan > 0 ? planPct : project.status.verify === "Pass" ? 100 : 15}
-                          size={40}
-                          stroke={3}
-                          color={meta.color}
-                          label={totalPlan > 0 ? `${doneCount}/${totalPlan}` : "—"}
-                        />
+                        return (
+                          <motion.article
+                            layout
+                            key={project.id}
+                            initial={{ opacity: 0, y: 12, scale: 0.99 }}
+                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                            exit={{ opacity: 0, scale: 0.97 }}
+                            transition={{
+                              ...SPRING_SMOOTH,
+                              delay: Math.min(index * 0.035, 0.2),
+                            }}
+                            whileHover={{ y: -1 }}
+                            className={`project-card ${meta.row} ${
+                              selectedId === project.id ? "selected" : ""
+                            }`}
+                            onClick={() => setSelectedId(project.id)}
+                          >
+                            <ProgressRing
+                              percent={totalPlan > 0 ? planPct : project.status.verify === "Pass" ? 100 : 15}
+                              size={40}
+                              stroke={3}
+                              color={meta.color}
+                              label={totalPlan > 0 ? `${doneCount}/${totalPlan}` : "—"}
+                            />
 
-                        <div style={{ minWidth: 0 }}>
-                          <div className="row-top">
-                            <span className="row-name">{project.name}</span>
-                            <span className={meta.pill}>{project.status.state}</span>
-                            {project.git.isGitRepo && (
-                              <span className={`mono-tag ${project.git.dirtyCount > 0 ? "dirty" : ""}`}>
-                                <GitBranch size={11} />
-                                {project.git.branch}
-                                {project.git.dirtyCount > 0 ? ` · ${project.git.dirtyCount} dirty` : ""}
-                              </span>
-                            )}
-                            {project.status.verify === "Pass" && (
-                              <span className="pill-badge pill-pass">Verify Pass</span>
-                            )}
-                            {project.antiSlop.hasSkill && (
-                              <span className="mono-tag" title="Bastion guardrails active">
-                                <Shield size={11} color="#34d399" /> Bastion
-                              </span>
-                            )}
-                          </div>
-
-                          <div className="row-details">
-                            <div className="row-line">
-                              <span className="row-line-label">Recent</span>
-                              <span className="row-line-text">{latestRecap}</span>
-                            </div>
-                            <div className="row-line">
-                              <span className="row-line-label">Next up</span>
-                              <span className="row-line-text">
-                                {nextPlan ? nextPlan.text : "All milestones done — add next goal"}
-                              </span>
-                            </div>
-                            {project.status.blockers.length > 0 && (
-                              <div className="row-blocker">
-                                <AlertTriangle size={12} />
-                                <span className="row-line-text">{project.status.blockers[0]}</span>
+                            <div style={{ minWidth: 0 }}>
+                              <div className="row-top">
+                                <span className="row-name">{project.name}</span>
+                                <span className={meta.pill}>{project.status.state}</span>
+                                {project.git.isGitRepo && (
+                                  <span className={`mono-tag ${project.git.dirtyCount > 0 ? "dirty" : ""}`}>
+                                    <GitBranch size={11} />
+                                    {project.git.branch}
+                                    {project.git.dirtyCount > 0 ? ` · ${project.git.dirtyCount} dirty` : ""}
+                                  </span>
+                                )}
+                                {project.status.verify === "Pass" && (
+                                  <span className="pill-badge pill-pass">Verify Pass</span>
+                                )}
+                                {project.antiSlop.hasSkill && (
+                                  <span className="mono-tag" title="Bastion guardrails active">
+                                    <Shield size={11} color="#34d399" /> Bastion
+                                  </span>
+                                )}
                               </div>
-                            )}
-                          </div>
-                        </div>
 
-                        <div className="row-actions" onClick={(e) => e.stopPropagation()}>
-                          <motion.button
-                            whileTap={{ scale: 0.96 }}
-                            className="btn btn-xs btn-primary"
-                            onClick={() => void handleCopyCmd(project)}
-                          >
-                            <Terminal size={11} /> Copy {activeAgentObj.label}
-                          </motion.button>
-                          <motion.button
-                            whileTap={{ scale: 0.96 }}
-                            className="btn btn-xs"
-                            onClick={() => void handleAutoRecapOne(project)}
-                          >
-                            <RefreshCw size={11} /> Sync Recap
-                          </motion.button>
-                        </div>
-                      </motion.article>
-                    );
-                  })}
-                </AnimatePresence>
+                              <div className="row-details">
+                                <div className="row-line">
+                                  <span className="row-line-label">Recent</span>
+                                  <span className="row-line-text">{latestRecap}</span>
+                                </div>
+                                <div className="row-line">
+                                  <span className="row-line-label">Next up</span>
+                                  <span className="row-line-text">
+                                    {nextPlan ? nextPlan.text : "All milestones done — add next goal"}
+                                  </span>
+                                </div>
+                                {project.status.blockers.length > 0 && (
+                                  <div className="row-blocker">
+                                    <AlertTriangle size={12} />
+                                    <span className="row-line-text">{project.status.blockers[0]}</span>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="row-actions" onClick={(e) => e.stopPropagation()}>
+                              <motion.button
+                                whileTap={{ scale: 0.96 }}
+                                className="btn btn-xs btn-primary"
+                                onClick={() => void handleCopyCmd(project)}
+                              >
+                                <Terminal size={11} /> Copy {activeAgentObj.label}
+                              </motion.button>
+                              <motion.button
+                                whileTap={{ scale: 0.96 }}
+                                className="btn btn-xs"
+                                onClick={() => void handleAutoRecapOne(project)}
+                              >
+                                <RefreshCw size={11} /> Sync Recap
+                              </motion.button>
+                            </div>
+                          </motion.article>
+                        );
+                      })}
+                    </AnimatePresence>
+                  </div>
+                ))}
               </div>
             )}
               </>
@@ -845,6 +960,29 @@ export function App() {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.2 }}
               >
+                <div>
+                  <div className="insp-section-title">Project Group</div>
+                  <div className="input-inline">
+                    <input
+                      className="text-input"
+                      placeholder="e.g., Client A, Work, Personal..."
+                      value={inspectorGroupDraft}
+                      onChange={(e) => setInspectorGroupDraft(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          void handleSaveGroup(selectedProject, inspectorGroupDraft);
+                        }
+                      }}
+                    />
+                    <button
+                      className="btn btn-xs"
+                      onClick={() => void handleSaveGroup(selectedProject, inspectorGroupDraft)}
+                    >
+                      Save
+                    </button>
+                  </div>
+                </div>
+
                 <div>
                   <div className="insp-section-title">Project Status</div>
                   <div className="glass-segmented cols-4">
@@ -1296,6 +1434,13 @@ export function App() {
                   <FolderOpen size={14} /> Browse...
                 </button>
               </div>
+
+              <input
+                className="text-input"
+                placeholder="Group name (optional — auto-fills from folder name)"
+                value={groupInput}
+                onChange={(e) => setGroupInput(e.target.value)}
+              />
 
               {scanCandidates && scanCandidates.length > 0 && (
                 <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>

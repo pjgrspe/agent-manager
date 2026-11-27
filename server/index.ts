@@ -171,7 +171,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === "POST" && pathname === "/api/projects") {
-      const body = await readJsonBody<{ path?: string; name?: string }>(req);
+      const body = await readJsonBody<{ path?: string; name?: string; group?: string }>(req);
       const cleaned = body.path ? cleanPathInput(body.path) : "";
       if (!cleaned) {
         sendJson(req, res, 400, { error: "Project path is required" });
@@ -180,11 +180,13 @@ const server = http.createServer(async (req, res) => {
       const resolved = path.resolve(cleaned);
       const entries = await loadProjectEntries();
       const id = createId(resolved);
+      const group = body.group?.trim() || undefined;
       if (!entries.some((e) => e.id === id)) {
         entries.push({
           id,
           name: body.name?.trim() || path.basename(resolved),
           path: resolved,
+          group,
         });
         await saveProjectEntries(entries);
       }
@@ -213,8 +215,9 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === "POST" && pathname === "/api/projects/batch") {
-      const body = await readJsonBody<{ paths?: string[] }>(req);
+      const body = await readJsonBody<{ paths?: string[]; group?: string }>(req);
       const paths = Array.isArray(body.paths) ? body.paths : [];
+      const group = body.group?.trim() || undefined;
       const entries = await loadProjectEntries();
       let added = 0;
       for (const raw of paths) {
@@ -223,13 +226,35 @@ const server = http.createServer(async (req, res) => {
         const resolved = path.resolve(cleaned);
         const id = createId(resolved);
         if (!entries.some((e) => e.id === id)) {
-          entries.push({ id, name: path.basename(resolved), path: resolved });
+          entries.push({ id, name: path.basename(resolved), path: resolved, group });
           added++;
         }
       }
       await saveProjectEntries(entries);
       const scanned = await Promise.all(entries.map(scanProject));
       sendJson(req, res, 200, { added, projects: scanned });
+      return;
+    }
+
+    const metaMatch = pathname.match(/^\/api\/projects\/([^/]+)\/meta$/);
+    if (req.method === "PUT" && metaMatch?.[1]) {
+      const id = decodeURIComponent(metaMatch[1]);
+      const body = await readJsonBody<{ group?: string; name?: string }>(req);
+      const entries = await loadProjectEntries();
+      const target = entries.find((e) => e.id === id);
+      if (!target) {
+        sendJson(req, res, 404, { error: "Project not found" });
+        return;
+      }
+      if (body.group !== undefined) {
+        target.group = body.group.trim() || undefined;
+      }
+      if (body.name !== undefined && body.name.trim()) {
+        target.name = body.name.trim();
+      }
+      await saveProjectEntries(entries);
+      const scanned = await Promise.all(entries.map(scanProject));
+      sendJson(req, res, 200, { projects: scanned });
       return;
     }
 

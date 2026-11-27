@@ -24,6 +24,7 @@ export interface StoredProjectEntry {
   id: string;
   name: string;
   path: string;
+  group?: string;
 }
 
 const DATA_DIR = path.resolve(process.cwd(), ".data");
@@ -183,6 +184,7 @@ export async function scanProject(entry: StoredProjectEntry): Promise<ManagedPro
       id: entry.id,
       name: entry.name,
       path: entry.path,
+      group: entry.group,
       exists: false,
       status: {
         state: "Idle",
@@ -211,7 +213,16 @@ export async function scanProject(entry: StoredProjectEntry): Promise<ManagedPro
     inspectAntiSlop(entry.path),
   ]);
 
-  return { id: entry.id, name: entry.name, path: entry.path, exists: true, status, git, antiSlop };
+  return {
+    id: entry.id,
+    name: entry.name,
+    path: entry.path,
+    group: entry.group,
+    exists: true,
+    status,
+    git,
+    antiSlop,
+  };
 }
 
 const SKIP_DIRS = new Set([

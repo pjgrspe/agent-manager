@@ -1,6 +1,6 @@
 # Agent Manager — Multi-Project Command Center
 
-A corporate-safe Windows desktop & local web dashboard for managing multiple repositories across **any coding agent** (**Claude Code, Antigravity, Codex, Cursor**) and `pjgrspe/anti-slop-kit`.
+A corporate-safe Windows desktop & local web dashboard for managing multiple repositories across **any coding agent** (**Claude Code, Antigravity, Codex, Cursor**) and `pjgrspe/codeguard`.
 
 ## Run Modes
 

@@ -118,12 +118,14 @@ async function inspectGit(repoPath: string): Promise<ProjectGitData> {
 }
 
 async function inspectAntiSlop(repoPath: string): Promise<AntiSlopInfo> {
-  const [hasAgentsMd, hasClaudeMd, hasSkill, hasLearnings] = await Promise.all([
+  const [hasAgentsMd, hasClaudeMd, hasCodeGuard, hasLegacySkill, hasLearnings] = await Promise.all([
     pathExists(path.join(repoPath, "AGENTS.md")),
     pathExists(path.join(repoPath, "CLAUDE.md")),
+    pathExists(path.join(repoPath, ".agents", "skills", "codeguard", "SKILL.md")),
     pathExists(path.join(repoPath, ".agents", "skills", "anti-slop-engineering", "SKILL.md")),
     pathExists(path.join(repoPath, ".agents", "project-learnings.md")),
   ]);
+  const hasSkill = hasCodeGuard || hasLegacySkill;
 
   let verifyCmd: string | null = null;
   if (hasLearnings) {

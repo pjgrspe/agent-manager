@@ -749,6 +749,13 @@ export function App() {
               >
                 <RefreshCw size={14} />
               </motion.button>
+              <motion.button
+                whileTap={{ scale: 0.96 }}
+                className="btn btn-primary btn-xs"
+                onClick={() => setShowAddModal(true)}
+              >
+                <FolderPlus size={13} /> Add Repo
+              </motion.button>
             </div>
           </header>
 

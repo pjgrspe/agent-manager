@@ -162,6 +162,7 @@ export function App() {
   const [scanCandidates, setScanCandidates] = useState<ScanCandidate[] | null>(null);
   const [selectedCandidates, setSelectedCandidates] = useState<Set<string>>(new Set());
   const [standup, setStandup] = useState<StandupSummary | null>(null);
+  const [standupTab, setStandupTab] = useState<"visual" | "markdown">("visual");
   const [copiedStandup, setCopiedStandup] = useState(false);
 
   const [newPlanText, setNewPlanText] = useState("");
@@ -1521,21 +1522,195 @@ export function App() {
             onClick={() => setStandup(null)}
           >
             <motion.div
-              className="modal-panel"
+              className="modal-panel standup-modal"
               initial={{ opacity: 0, scale: 0.95, y: 12 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 12 }}
               transition={SPRING_SNAPPY}
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="inspector-header" style={{ padding: 0, borderBottom: "none" }}>
-                <h2>Morning Standup Digest</h2>
-                <button className="btn btn-ghost btn-xs" onClick={() => setStandup(null)}>
-                  <X size={15} />
-                </button>
+              <div className="inspector-header" style={{ padding: 0, borderBottom: "none", alignItems: "center" }}>
+                <div>
+                  <div className="hero-eyebrow" style={{ marginBottom: 2 }}>
+                    <Sparkles size={11} style={{ verticalAlign: "-1px", marginRight: 5 }} />
+                    {new Date(standup.generatedAt).toLocaleDateString(undefined, {
+                      weekday: "long",
+                      month: "short",
+                      day: "numeric",
+                      year: "numeric",
+                    })}
+                  </div>
+                  <h2 style={{ margin: 0 }}>Morning Standup Briefing</h2>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <div className="glass-segmented" style={{ width: 170 }}>
+                    <button
+                      className={`seg-option ${standupTab === "visual" ? "active" : ""}`}
+                      onClick={() => setStandupTab("visual")}
+                    >
+                      {standupTab === "visual" && (
+                        <motion.span layoutId="standup-tab-pill" className="seg-pill-bg" transition={SPRING_SNAPPY} />
+                      )}
+                      <span className="seg-label">Briefing</span>
+                    </button>
+                    <button
+                      className={`seg-option ${standupTab === "markdown" ? "active" : ""}`}
+                      onClick={() => setStandupTab("markdown")}
+                    >
+                      {standupTab === "markdown" && (
+                        <motion.span layoutId="standup-tab-pill" className="seg-pill-bg" transition={SPRING_SNAPPY} />
+                      )}
+                      <span className="seg-label">Markdown</span>
+                    </button>
+                  </div>
+                  <button className="btn btn-ghost btn-xs" onClick={() => setStandup(null)}>
+                    <X size={15} />
+                  </button>
+                </div>
               </div>
-              <pre className="standup-code">{standup.markdown}</pre>
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+
+              {standupTab === "markdown" ? (
+                <pre className="standup-code">{standup.markdown}</pre>
+              ) : (
+                <>
+                  <div className="standup-stats">
+                    <div className="standup-stat">
+                      <div className="standup-stat-num">{standup.counts.total}</div>
+                      <div className="standup-stat-label">Tracked Repos</div>
+                    </div>
+                    <div className="standup-stat">
+                      <div className="standup-stat-num" style={{ color: "var(--rose)" }}>
+                        {standup.counts.blocked}
+                      </div>
+                      <div className="standup-stat-label">Needs Decision</div>
+                    </div>
+                    <div className="standup-stat">
+                      <div className="standup-stat-num" style={{ color: "var(--amber)" }}>
+                        {standup.counts.waitingOnReview}
+                      </div>
+                      <div className="standup-stat-label">Ready to Review</div>
+                    </div>
+                    <div className="standup-stat">
+                      <div className="standup-stat-num" style={{ color: "var(--sky)" }}>
+                        {standup.counts.active}
+                      </div>
+                      <div className="standup-stat-label">In Progress</div>
+                    </div>
+                  </div>
+
+                  {(
+                    [
+                      {
+                        key: "blocked",
+                        title: "Needs Your Decision",
+                        cls: "sec-blocked",
+                        dot: "dot-blocked",
+                        list: projects.filter((p) => isProjectBlocked(p)),
+                      },
+                      {
+                        key: "review",
+                        title: "Ready for Review",
+                        cls: "sec-review",
+                        dot: "dot-review",
+                        list: projects.filter((p) => p.status.state === "Waiting on Review"),
+                      },
+                      {
+                        key: "active",
+                        title: "Active Work",
+                        cls: "sec-active",
+                        dot: "dot-active",
+                        list: projects.filter(
+                          (p) => p.status.state === "Active" && !isProjectBlocked(p),
+                        ),
+                      },
+                    ] as const
+                  )
+                    .filter((sec) => sec.list.length > 0)
+                    .map((sec) => (
+                      <div key={sec.key} className={`standup-section ${sec.cls}`}>
+                        <div className="standup-sec-title">
+                          <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
+                            <span className={`status-dot ${sec.dot}`} />
+                            {sec.title}
+                          </span>
+                          <span className="nav-count">{sec.list.length}</span>
+                        </div>
+                        {sec.list.map((p) => {
+                          const nextTask = p.status.plan.find((t) => !t.done)?.text;
+                          const latest = p.status.recap[0] ?? p.git.recentCommits[0]?.subject;
+                          return (
+                            <button
+                              key={p.id}
+                              className="standup-item"
+                              onClick={() => {
+                                setSelectedId(p.id);
+                                setStandup(null);
+                              }}
+                            >
+                              <div style={{ minWidth: 0 }}>
+                                <div className="standup-item-name">
+                                  <span>{p.name}</span>
+                                  {p.git.isGitRepo && (
+                                    <span className="mono-tag">{p.git.branch}</span>
+                                  )}
+                                  {p.group && <span className="mono-tag">{p.group}</span>}
+                                </div>
+                                {p.status.blockers[0] && (
+                                  <div className="standup-item-meta" style={{ color: "var(--rose)" }}>
+                                    Blocker: {p.status.blockers[0]}
+                                  </div>
+                                )}
+                                <div className="standup-item-meta">
+                                  {nextTask
+                                    ? `Next: ${nextTask}`
+                                    : latest
+                                      ? `Recent: ${latest}`
+                                      : "No recent updates recorded"}
+                                </div>
+                              </div>
+                              <span
+                                className={
+                                  p.status.verify === "Pass"
+                                    ? "pill-badge pill-pass"
+                                    : "pill-badge pill-idle"
+                                }
+                              >
+                                Verify: {p.status.verify}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ))}
+
+                  {standup.counts.blocked === 0 &&
+                    standup.counts.waitingOnReview === 0 &&
+                    standup.counts.active === 0 && (
+                      <div className="standup-section">
+                        <div className="bento-empty" style={{ padding: "8px 4px" }}>
+                          <CheckCircle2 size={16} color="#34d399" />
+                          <span>All tracked repositories are currently idle with zero blockers.</span>
+                        </div>
+                      </div>
+                    )}
+
+                  {standup.counts.idle > 0 && (
+                    <div style={{ fontSize: 12, color: "var(--text-muted)", padding: "0 2px" }}>
+                      + {standup.counts.idle} quiet/idle repo{standup.counts.idle > 1 ? "s" : ""} (
+                      {projects
+                        .filter((p) => p.status.state === "Idle" && !isProjectBlocked(p))
+                        .map((p) => p.name)
+                        .join(", ")}
+                      )
+                    </div>
+                  )}
+                </>
+              )}
+
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                <span style={{ fontSize: 11.5, color: "var(--text-muted)" }}>
+                  Click any project above to jump straight into its workspace
+                </span>
                 <button
                   className="btn btn-primary"
                   onClick={() => {
@@ -1549,7 +1724,7 @@ export function App() {
                     </>
                   ) : (
                     <>
-                      <Copy size={13} /> Copy Markdown
+                      <Copy size={13} /> Copy for Slack / Docs
                     </>
                   )}
                 </button>

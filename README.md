@@ -1,10 +1,10 @@
-# Claude Manager — Multi-Project Command Center
+# Agent Manager — Multi-Project Command Center
 
-A lightweight Windows desktop & local web dashboard for managing multiple repositories with **Claude Code** and `pjgrspe/anti-slop-kit`.
+A corporate-safe Windows desktop & local web dashboard for managing multiple repositories across **any coding agent** (**Claude Code, Antigravity, Codex, Cursor**) and `pjgrspe/anti-slop-kit`.
 
 ## Run Modes
 
-- **Local Web Dashboard:**
+- **Local Web Dashboard (Recommended on corporate laptops):**
   ```powershell
   npm run dev
   ```

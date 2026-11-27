@@ -17,7 +17,7 @@ import {
   addProject,
   autoRecapAll,
   autoRecapOne,
-  buildClaudeCommand,
+  buildAgentCommand,
   fetchProjects,
   fetchStandup,
   removeProject,
@@ -25,6 +25,7 @@ import {
   updateProjectStatus,
 } from "./core/api.ts";
 import type {
+  AgentKind,
   ManagedProject,
   ProjectState,
   StandupSummary,
@@ -53,6 +54,10 @@ export function App() {
   const [filter, setFilter] = useState<FilterState>("All");
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [agent, setAgent] = useState<AgentKind>(() => {
+    const saved = localStorage.getItem("agent-manager:preferred-agent") as AgentKind | null;
+    return saved ?? "claude";
+  });
 
   // Modals
   const [showAddModal, setShowAddModal] = useState(false);
@@ -195,11 +200,11 @@ export function App() {
 
   async function handleLaunch(project: ManagedProject, prompt?: string) {
     try {
-      const cmd = await buildClaudeCommand(project.id, prompt);
+      const cmd = await buildAgentCommand(project.id, agent, prompt);
       await navigator.clipboard.writeText(cmd);
-      setNotice(`Copied command for ${project.name} — paste into your terminal: ${cmd}`);
+      setNotice(`Copied ${agent} command for ${project.name} — paste into your terminal: ${cmd}`);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to prepare Claude Code command");
+      setError(e instanceof Error ? e.message : "Failed to prepare agent command");
     }
   }
 
@@ -219,11 +224,26 @@ export function App() {
         <div className="brand">
           <h1>
             <Layers size={20} color="#818cf8" />
-            Claude Manager
+            Agent Manager
           </h1>
-          <p>Multi-project overview, recaps, plans &amp; 1-click Claude Code dispatch</p>
+          <p>Multi-project overview, auto-recaps, plans &amp; multi-agent CLI dispatch</p>
         </div>
         <div className="topbar-actions">
+          <select
+            className="btn"
+            aria-label="Preferred Agent"
+            value={agent}
+            onChange={(e) => {
+              const next = e.target.value as AgentKind;
+              setAgent(next);
+              localStorage.setItem("agent-manager:preferred-agent", next);
+            }}
+          >
+            <option value="claude">Agent: Claude Code</option>
+            <option value="antigravity">Agent: Antigravity</option>
+            <option value="codex">Agent: Codex</option>
+            <option value="cursor">Agent: Cursor</option>
+          </select>
           <button className="btn" onClick={() => void handleAutoRecapAll()} disabled={loading}>
             <RefreshCw size={15} />
             Auto-Sync All Recaps
@@ -386,7 +406,7 @@ export function App() {
                     className="btn btn-sm btn-primary"
                     onClick={() => void handleLaunch(project)}
                   >
-                    <Terminal size={13} /> Copy Claude Cmd
+                    <Terminal size={13} /> Copy Agent Cmd
                   </button>
                   <button
                     className="btn btn-sm"
@@ -452,10 +472,10 @@ export function App() {
             </div>
 
             <div>
-              <div className="card-section-title">1-Click Claude Code Dispatch</div>
+              <div className="card-section-title">1-Click Agent Command Copy ({agent})</div>
               <div className="topbar-actions" style={{ marginBottom: 8 }}>
                 <button className="btn btn-sm btn-primary" onClick={() => void handleLaunch(selectedProject)}>
-                  <Terminal size={13} /> Open Claude
+                  <Terminal size={13} /> Copy {agent} Cmd
                 </button>
                 <button
                   className="btn btn-sm"
@@ -486,7 +506,7 @@ export function App() {
                     padding: "7px 10px",
                     fontSize: 13,
                   }}
-                  placeholder="Send a custom manager task to Claude Code..."
+                  placeholder={`Build a custom manager task command for ${agent}...`}
                   value={customPrompt}
                   onChange={(e) => setCustomPrompt(e.target.value)}
                 />
@@ -498,7 +518,7 @@ export function App() {
                     setCustomPrompt("");
                   }}
                 >
-                  Dispatch
+                  Copy Cmd
                 </button>
               </div>
             </div>

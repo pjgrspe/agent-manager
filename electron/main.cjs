@@ -9,7 +9,7 @@ function createWindow() {
     minWidth: 960,
     minHeight: 640,
     backgroundColor: "#0b0e14",
-    title: "Claude Manager — Multi-Project Command Center",
+    title: "Agent Manager — Multi-Project Command Center",
     autoHideMenuBar: true,
     webPreferences: {
       contextIsolation: true,

@@ -1,4 +1,4 @@
-import type { ManagedProject, ProjectStatusData, StandupSummary } from "./types.ts";
+import type { AgentKind, ManagedProject, ProjectStatusData, StandupSummary } from "./types.ts";
 
 const API_BASE = "/api";
 
@@ -67,11 +67,18 @@ export async function autoRecapOne(id: string): Promise<ManagedProject> {
   return res.project;
 }
 
-export async function buildClaudeCommand(id: string, prompt?: string): Promise<string> {
-  const res = await requestJson<{ command: string }>(`/projects/${encodeURIComponent(id)}/launch-claude`, {
-    method: "POST",
-    body: JSON.stringify({ prompt }),
-  });
+export async function buildAgentCommand(
+  id: string,
+  agent: AgentKind,
+  prompt?: string,
+): Promise<string> {
+  const res = await requestJson<{ command: string }>(
+    `/projects/${encodeURIComponent(id)}/launch-agent`,
+    {
+      method: "POST",
+      body: JSON.stringify({ agent, prompt }),
+    },
+  );
   return res.command;
 }
 

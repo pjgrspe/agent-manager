@@ -1,6 +1,6 @@
 import http from "node:http";
 import path from "node:path";
-import type { ProjectStatusData } from "../src/core/types.ts";
+import type { AgentKind, ProjectStatusData } from "../src/core/types.ts";
 import {
   autoRecapProject,
   buildStandupSummary,
@@ -34,11 +34,28 @@ async function readJsonBody<T>(req: http.IncomingMessage): Promise<T> {
   return (raw ? JSON.parse(raw) : {}) as T;
 }
 
-function buildClaudeCommand(repoPath: string, initialPrompt?: string): string {
+function buildAgentCommand(repoPath: string, agent: AgentKind = "claude", initialPrompt?: string): string {
   const escapedPath = repoPath.replace(/'/g, "''");
   const safePrompt = initialPrompt?.replace(/"/g, '\\"').trim();
-  const claudeCmd = safePrompt ? `claude "${safePrompt}"` : "claude";
-  return `Set-Location -LiteralPath '${escapedPath}'; ${claudeCmd}`;
+
+  let agentCmd: string;
+  switch (agent) {
+    case "antigravity":
+      agentCmd = safePrompt ? `agy "${safePrompt}"` : "agy";
+      break;
+    case "codex":
+      agentCmd = safePrompt ? `codex "${safePrompt}"` : "codex";
+      break;
+    case "cursor":
+      agentCmd = "cursor .";
+      break;
+    case "claude":
+    default:
+      agentCmd = safePrompt ? `claude "${safePrompt}"` : "claude";
+      break;
+  }
+
+  return `Set-Location -LiteralPath '${escapedPath}'; ${agentCmd}`;
 }
 
 const server = http.createServer(async (req, res) => {
@@ -164,7 +181,7 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    const launchMatch = pathname.match(/^\/api\/projects\/([^/]+)\/launch-claude$/);
+    const launchMatch = pathname.match(/^\/api\/projects\/([^/]+)\/(?:launch-agent|launch-claude)$/);
     if (req.method === "POST" && launchMatch?.[1]) {
       const id = decodeURIComponent(launchMatch[1]);
       const entries = await loadProjectEntries();
@@ -173,8 +190,8 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 404, { error: "Project not found" });
         return;
       }
-      const body = await readJsonBody<{ prompt?: string }>(req);
-      const command = buildClaudeCommand(target.path, body.prompt);
+      const body = await readJsonBody<{ agent?: AgentKind; prompt?: string }>(req);
+      const command = buildAgentCommand(target.path, body.agent ?? "claude", body.prompt);
       sendJson(res, 200, { command, repoPath: target.path });
       return;
     }
@@ -187,5 +204,5 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, "127.0.0.1", () => {
-  console.log(`[claude-manager] API listening on http://127.0.0.1:${PORT}`);
+  console.log(`[agent-manager] API listening on http://127.0.0.1:${PORT}`);
 });

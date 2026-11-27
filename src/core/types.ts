@@ -1,5 +1,6 @@
 export type ProjectState = "Active" | "Waiting on Review" | "Blocked" | "Idle";
 export type VerifyHealth = "Pass" | "Fail" | "Unknown";
+export type AgentKind = "claude" | "antigravity" | "codex" | "cursor";
 
 export interface PlanItem {
   text: string;

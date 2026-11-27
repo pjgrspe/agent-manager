@@ -73,7 +73,12 @@ const server = http.createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", `http://127.0.0.1:${PORT}`);
     const pathname = url.pathname;
 
-    if (req.method === "GET" && pathname === "/api/health") {
+    if ((req.method === "GET" || req.method === "HEAD") && pathname === "/api/health") {
+      if (req.method === "HEAD") {
+        res.writeHead(200);
+        res.end();
+        return;
+      }
       sendJson(res, 200, { ok: true, port: PORT });
       return;
     }

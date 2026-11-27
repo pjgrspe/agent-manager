@@ -1,3 +1,4 @@
+import fs from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
 import type { AgentKind, ProjectStatusData } from "../src/core/types.ts";
@@ -13,16 +14,54 @@ import {
 } from "./scanner.ts";
 
 const PORT = Number(process.env.MANAGER_PORT ?? 4311);
-const ALLOWED_ORIGIN = "http://localhost:5173";
+const DIST_DIR = path.resolve(process.cwd(), "dist");
+const ALLOWED_ORIGINS = new Set([
+  "http://localhost:5173",
+  `http://127.0.0.1:${PORT}`,
+  `http://localhost:${PORT}`,
+]);
 
-function sendJson(res: http.ServerResponse, status: number, payload: unknown): void {
+const MIME_TYPES: Record<string, string> = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "application/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".ico": "image/x-icon",
+  ".json": "application/json; charset=utf-8",
+};
+
+function corsOrigin(req: http.IncomingMessage): string {
+  const origin = req.headers.origin;
+  return origin && ALLOWED_ORIGINS.has(origin) ? origin : `http://127.0.0.1:${PORT}`;
+}
+
+function sendJson(req: http.IncomingMessage, res: http.ServerResponse, status: number, payload: unknown): void {
   res.writeHead(status, {
     "Content-Type": "application/json; charset=utf-8",
-    "Access-Control-Allow-Origin": ALLOWED_ORIGIN,
+    "Access-Control-Allow-Origin": corsOrigin(req),
     "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type",
   });
   res.end(JSON.stringify(payload));
+}
+
+async function tryServeStatic(pathname: string, res: http.ServerResponse): Promise<boolean> {
+  const safePath = pathname === "/" ? "index.html" : pathname.replace(/^\/+/, "");
+  const fullPath = path.resolve(DIST_DIR, safePath);
+  if (!fullPath.startsWith(DIST_DIR)) return false;
+
+  try {
+    const stat = await fs.stat(fullPath);
+    if (!stat.isFile()) return false;
+    const content = await fs.readFile(fullPath);
+    const ext = path.extname(fullPath).toLowerCase();
+    res.writeHead(200, { "Content-Type": MIME_TYPES[ext] ?? "application/octet-stream" });
+    res.end(content);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function readJsonBody<T>(req: http.IncomingMessage): Promise<T> {
@@ -62,7 +101,7 @@ const server = http.createServer(async (req, res) => {
   try {
     if (req.method === "OPTIONS") {
       res.writeHead(204, {
-        "Access-Control-Allow-Origin": ALLOWED_ORIGIN,
+        "Access-Control-Allow-Origin": corsOrigin(req),
         "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS",
         "Access-Control-Allow-Headers": "Content-Type",
       });
@@ -79,28 +118,28 @@ const server = http.createServer(async (req, res) => {
         res.end();
         return;
       }
-      sendJson(res, 200, { ok: true, port: PORT });
+      sendJson(req, res, 200, { ok: true, port: PORT });
       return;
     }
 
     if (req.method === "GET" && pathname === "/api/projects") {
       const entries = await loadProjectEntries();
       const scanned = await Promise.all(entries.map(scanProject));
-      sendJson(res, 200, { projects: scanned });
+      sendJson(req, res, 200, { projects: scanned });
       return;
     }
 
     if (req.method === "GET" && pathname === "/api/standup") {
       const entries = await loadProjectEntries();
       const scanned = await Promise.all(entries.map(scanProject));
-      sendJson(res, 200, buildStandupSummary(scanned));
+      sendJson(req, res, 200, buildStandupSummary(scanned));
       return;
     }
 
     if (req.method === "POST" && pathname === "/api/projects") {
       const body = await readJsonBody<{ path?: string; name?: string }>(req);
       if (!body.path || !body.path.trim()) {
-        sendJson(res, 400, { error: "Project path is required" });
+        sendJson(req, res, 400, { error: "Project path is required" });
         return;
       }
       const resolved = path.resolve(body.path.trim());
@@ -115,14 +154,14 @@ const server = http.createServer(async (req, res) => {
         await saveProjectEntries(entries);
       }
       const scanned = await Promise.all(entries.map(scanProject));
-      sendJson(res, 200, { projects: scanned });
+      sendJson(req, res, 200, { projects: scanned });
       return;
     }
 
     if (req.method === "POST" && pathname === "/api/projects/scan-folder") {
       const body = await readJsonBody<{ rootFolder?: string }>(req);
       if (!body.rootFolder || !body.rootFolder.trim()) {
-        sendJson(res, 400, { error: "rootFolder is required" });
+        sendJson(req, res, 400, { error: "rootFolder is required" });
         return;
       }
       const discovered = await discoverReposInFolder(body.rootFolder.trim());
@@ -136,7 +175,7 @@ const server = http.createServer(async (req, res) => {
       }
       await saveProjectEntries(entries);
       const scanned = await Promise.all(entries.map(scanProject));
-      sendJson(res, 200, { added, projects: scanned });
+      sendJson(req, res, 200, { added, projects: scanned });
       return;
     }
 
@@ -146,7 +185,7 @@ const server = http.createServer(async (req, res) => {
       const entries = (await loadProjectEntries()).filter((e) => e.id !== id);
       await saveProjectEntries(entries);
       const scanned = await Promise.all(entries.map(scanProject));
-      sendJson(res, 200, { projects: scanned });
+      sendJson(req, res, 200, { projects: scanned });
       return;
     }
 
@@ -156,19 +195,19 @@ const server = http.createServer(async (req, res) => {
       const entries = await loadProjectEntries();
       const target = entries.find((e) => e.id === id);
       if (!target) {
-        sendJson(res, 404, { error: "Project not found" });
+        sendJson(req, res, 404, { error: "Project not found" });
         return;
       }
       const body = await readJsonBody<Omit<ProjectStatusData, "hasStatusFile">>(req);
       const updatedStatus = await writeProjectStatus(target.path, body);
-      sendJson(res, 200, { status: updatedStatus });
+      sendJson(req, res, 200, { status: updatedStatus });
       return;
     }
 
     if (req.method === "POST" && pathname === "/api/projects/auto-recap-all") {
       const entries = await loadProjectEntries();
       const updated = await Promise.all(entries.map(autoRecapProject));
-      sendJson(res, 200, { projects: updated });
+      sendJson(req, res, 200, { projects: updated });
       return;
     }
 
@@ -178,11 +217,11 @@ const server = http.createServer(async (req, res) => {
       const entries = await loadProjectEntries();
       const target = entries.find((e) => e.id === id);
       if (!target) {
-        sendJson(res, 404, { error: "Project not found" });
+        sendJson(req, res, 404, { error: "Project not found" });
         return;
       }
       const updated = await autoRecapProject(target);
-      sendJson(res, 200, { project: updated });
+      sendJson(req, res, 200, { project: updated });
       return;
     }
 
@@ -192,19 +231,24 @@ const server = http.createServer(async (req, res) => {
       const entries = await loadProjectEntries();
       const target = entries.find((e) => e.id === id);
       if (!target) {
-        sendJson(res, 404, { error: "Project not found" });
+        sendJson(req, res, 404, { error: "Project not found" });
         return;
       }
       const body = await readJsonBody<{ agent?: AgentKind; prompt?: string }>(req);
       const command = buildAgentCommand(target.path, body.agent ?? "claude", body.prompt);
-      sendJson(res, 200, { command, repoPath: target.path });
+      sendJson(req, res, 200, { command, repoPath: target.path });
       return;
     }
 
-    sendJson(res, 404, { error: "Not found" });
+    if (req.method === "GET" && !pathname.startsWith("/api/")) {
+      if (await tryServeStatic(pathname, res)) return;
+      if (await tryServeStatic("/", res)) return;
+    }
+
+    sendJson(req, res, 404, { error: "Not found" });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unexpected server error";
-    sendJson(res, 500, { error: message });
+    sendJson(req, res, 500, { error: message });
   }
 });
 

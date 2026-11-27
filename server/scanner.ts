@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import {
+  buildAutoRecapStatus,
   extractVerifyCommand,
   parseStatusMarkdown,
   serializeStatusMarkdown,
@@ -240,6 +241,16 @@ export async function writeProjectStatus(
   });
   await fs.writeFile(path.join(agentsDir, "status.md"), content, "utf8");
   return parseStatusMarkdown(content);
+}
+
+export async function autoRecapProject(entry: StoredProjectEntry): Promise<ManagedProject> {
+  const scanned = await scanProject(entry);
+  if (!scanned.exists || !scanned.git.isGitRepo) {
+    return scanned;
+  }
+  const nextData = buildAutoRecapStatus(scanned.status, scanned.git);
+  const savedStatus = await writeProjectStatus(entry.path, nextData);
+  return { ...scanned, status: savedStatus };
 }
 
 export function buildStandupSummary(projects: ManagedProject[]): StandupSummary {

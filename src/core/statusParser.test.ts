@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  buildAutoRecapStatus,
   extractVerifyCommand,
   parseStatusMarkdown,
   serializeStatusMarkdown,
@@ -54,5 +55,32 @@ describe("statusParser", () => {
     const md = `- **Verify Cmd:** \`npm run verify\``;
     assert.equal(extractVerifyCommand(md), "npm run verify");
     assert.equal(extractVerifyCommand(`- **Verify Cmd:** _(exact quiet single command)_`), null);
+  });
+
+  it("auto-builds git-backed recap while preserving plan, blockers, and Waiting on Review", () => {
+    const existing = {
+      state: "Waiting on Review" as const,
+      updated: "2026-11-20",
+      verify: "Pass" as const,
+      recap: ["Old recap"],
+      plan: [{ done: false, text: "Ship v2" }],
+      blockers: [],
+      hasStatusFile: true,
+    };
+    const next = buildAutoRecapStatus(
+      existing,
+      {
+        isGitRepo: true,
+        branch: "main",
+        dirtyCount: 2,
+        recentCommits: [{ hash: "abc1234", date: "2026-11-27", subject: "Add auth guard" }],
+      },
+      "2026-11-27",
+    );
+    assert.equal(next.state, "Waiting on Review");
+    assert.equal(next.verify, "Pass");
+    assert.deepEqual(next.plan, existing.plan);
+    assert.equal(next.recap[0], "WIP on main: 2 uncommitted file(s)");
+    assert.equal(next.recap[1], "[2026-11-27] Add auth guard (abc1234)");
   });
 });

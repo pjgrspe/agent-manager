@@ -15,6 +15,8 @@ import {
 } from "lucide-react";
 import {
   addProject,
+  autoRecapAll,
+  autoRecapOne,
   buildClaudeCommand,
   fetchProjects,
   fetchStandup,
@@ -163,6 +165,34 @@ export function App() {
     }
   }
 
+  async function handleAutoRecapAll() {
+    setLoading(true);
+    setError(null);
+    try {
+      const updated = await autoRecapAll();
+      setProjects(updated);
+      setNotice(`Auto-synced recaps from Git across ${updated.length} project(s).`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to auto-sync recaps");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleAutoRecapOne(project: ManagedProject) {
+    setSaving(true);
+    setError(null);
+    try {
+      const updated = await autoRecapOne(project.id);
+      setProjects((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
+      setNotice(`Synced recap for ${project.name} into .agents/status.md`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to sync recap");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function handleLaunch(project: ManagedProject, prompt?: string) {
     try {
       const cmd = await buildClaudeCommand(project.id, prompt);
@@ -194,12 +224,15 @@ export function App() {
           <p>Multi-project overview, recaps, plans &amp; 1-click Claude Code dispatch</p>
         </div>
         <div className="topbar-actions">
+          <button className="btn" onClick={() => void handleAutoRecapAll()} disabled={loading}>
+            <RefreshCw size={15} />
+            Auto-Sync All Recaps
+          </button>
           <button className="btn" onClick={() => void handleOpenStandup()}>
             <ClipboardList size={15} />
             Morning Standup
           </button>
           <button className="btn" onClick={() => void loadAll()} disabled={loading}>
-            <RefreshCw size={15} />
             Refresh
           </button>
           <button className="btn btn-primary" onClick={() => setShowAddModal(true)}>
@@ -357,9 +390,9 @@ export function App() {
                   </button>
                   <button
                     className="btn btn-sm"
-                    onClick={() => void handleLaunch(project, "/anti-slop recap")}
+                    onClick={() => void handleAutoRecapOne(project)}
                   >
-                    Copy Recap Cmd
+                    Auto-Recap
                   </button>
                 </div>
               </article>

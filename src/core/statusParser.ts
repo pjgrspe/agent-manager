@@ -129,3 +129,37 @@ export function extractVerifyCommand(learningsMarkdown: string): string | null {
   }
   return value;
 }
+
+export function buildAutoRecapStatus(
+  existing: ProjectStatusData,
+  git: { isGitRepo: boolean; branch: string; dirtyCount: number; recentCommits: Array<{ hash: string; date: string; subject: string }> },
+  todayIso: string = new Date().toISOString().slice(0, 10),
+): Omit<ProjectStatusData, "hasStatusFile"> {
+  const recap: string[] = [];
+
+  if (git.isGitRepo) {
+    for (const c of git.recentCommits.slice(0, 3)) {
+      recap.push(`[${c.date}] ${c.subject} (${c.hash})`);
+    }
+    if (git.dirtyCount > 0) {
+      recap.unshift(`WIP on ${git.branch}: ${git.dirtyCount} uncommitted file(s)`);
+    }
+  }
+
+  let nextState: ProjectState = existing.state;
+  if (existing.blockers.length > 0) {
+    nextState = "Blocked";
+  } else if (existing.state !== "Waiting on Review") {
+    const hasRecentCommit = git.recentCommits[0]?.date === todayIso;
+    nextState = git.dirtyCount > 0 || hasRecentCommit ? "Active" : "Idle";
+  }
+
+  return {
+    state: nextState,
+    updated: todayIso,
+    verify: existing.verify,
+    recap: recap.length > 0 ? recap : existing.recap,
+    plan: existing.plan,
+    blockers: existing.blockers,
+  };
+}

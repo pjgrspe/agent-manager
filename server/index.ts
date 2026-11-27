@@ -2,6 +2,7 @@ import http from "node:http";
 import path from "node:path";
 import type { ProjectStatusData } from "../src/core/types.ts";
 import {
+  autoRecapProject,
   buildStandupSummary,
   createId,
   discoverReposInFolder,
@@ -139,6 +140,27 @@ const server = http.createServer(async (req, res) => {
       const body = await readJsonBody<Omit<ProjectStatusData, "hasStatusFile">>(req);
       const updatedStatus = await writeProjectStatus(target.path, body);
       sendJson(res, 200, { status: updatedStatus });
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/projects/auto-recap-all") {
+      const entries = await loadProjectEntries();
+      const updated = await Promise.all(entries.map(autoRecapProject));
+      sendJson(res, 200, { projects: updated });
+      return;
+    }
+
+    const autoRecapMatch = pathname.match(/^\/api\/projects\/([^/]+)\/auto-recap$/);
+    if (req.method === "POST" && autoRecapMatch?.[1]) {
+      const id = decodeURIComponent(autoRecapMatch[1]);
+      const entries = await loadProjectEntries();
+      const target = entries.find((e) => e.id === id);
+      if (!target) {
+        sendJson(res, 404, { error: "Project not found" });
+        return;
+      }
+      const updated = await autoRecapProject(target);
+      sendJson(res, 200, { project: updated });
       return;
     }
 

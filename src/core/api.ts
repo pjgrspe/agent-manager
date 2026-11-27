@@ -52,6 +52,21 @@ export async function updateProjectStatus(
   return res.status;
 }
 
+export async function autoRecapAll(): Promise<ManagedProject[]> {
+  const res = await requestJson<{ projects: ManagedProject[] }>("/projects/auto-recap-all", {
+    method: "POST",
+  });
+  return res.projects;
+}
+
+export async function autoRecapOne(id: string): Promise<ManagedProject> {
+  const res = await requestJson<{ project: ManagedProject }>(
+    `/projects/${encodeURIComponent(id)}/auto-recap`,
+    { method: "POST" },
+  );
+  return res.project;
+}
+
 export async function buildClaudeCommand(id: string, prompt?: string): Promise<string> {
   const res = await requestJson<{ command: string }>(`/projects/${encodeURIComponent(id)}/launch-claude`, {
     method: "POST",

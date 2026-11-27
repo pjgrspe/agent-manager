@@ -300,7 +300,7 @@ export function App() {
           <div className="kpi-value" style={{ color: "var(--red)" }}>{stats.blocked}</div>
         </div>
         <div className="kpi-card">
-          <div className="kpi-label">CodeGuard Active</div>
+          <div className="kpi-label">Bastion Active</div>
           <div className="kpi-value" style={{ color: "var(--green)" }}>
             {stats.guarded}/{stats.total}
           </div>
@@ -479,21 +479,21 @@ export function App() {
                 </button>
                 <button
                   className="btn btn-sm"
-                  onClick={() => void handleLaunch(selectedProject, "/codeguard recap")}
+                  onClick={() => void handleLaunch(selectedProject, "/bastion recap")}
                 >
-                  /codeguard recap
+                  /bastion recap
                 </button>
                 <button
                   className="btn btn-sm"
-                  onClick={() => void handleLaunch(selectedProject, "/codeguard harden")}
+                  onClick={() => void handleLaunch(selectedProject, "/bastion harden")}
                 >
-                  /codeguard harden
+                  /bastion harden
                 </button>
                 <button
                   className="btn btn-sm"
-                  onClick={() => void handleLaunch(selectedProject, "/codeguard audit")}
+                  onClick={() => void handleLaunch(selectedProject, "/bastion audit")}
                 >
-                  /codeguard audit
+                  /bastion audit
                 </button>
               </div>
               <div className="field-row">

@@ -158,6 +158,7 @@ export function App() {
   const [pathInput, setPathInput] = useState("");
   const [groupInput, setGroupInput] = useState("");
   const [activeGroup, setActiveGroup] = useState<string | null>(null);
+  const [inspectorNameDraft, setInspectorNameDraft] = useState("");
   const [inspectorGroupDraft, setInspectorGroupDraft] = useState("");
   const [scanCandidates, setScanCandidates] = useState<ScanCandidate[] | null>(null);
   const [selectedCandidates, setSelectedCandidates] = useState<Set<string>>(new Set());
@@ -253,8 +254,9 @@ export function App() {
   );
 
   useEffect(() => {
+    setInspectorNameDraft(selectedProject?.name ?? "");
     setInspectorGroupDraft(selectedProject?.group ?? "");
-  }, [selectedProject?.id, selectedProject?.group]);
+  }, [selectedProject?.id, selectedProject?.name, selectedProject?.group]);
 
   const stats = useMemo(() => {
     return {
@@ -382,15 +384,17 @@ export function App() {
     }
   }
 
-  async function handleSaveGroup(project: ManagedProject, nextGroup: string) {
+  async function handleSaveMeta(project: ManagedProject, nextName: string, nextGroup: string) {
     try {
-      const updated = await updateProjectMeta(project.id, { group: nextGroup });
+      const cleanedName = nextName.trim() || project.name;
+      const updated = await updateProjectMeta(project.id, {
+        name: cleanedName,
+        group: nextGroup,
+      });
       setProjects(updated);
-      showToast(
-        nextGroup.trim() ? `Moved ${project.name} to "${nextGroup.trim()}"` : `Ungrouped ${project.name}`,
-      );
+      showToast(`Saved "${cleanedName}"`, nextGroup.trim() ? `Group: ${nextGroup.trim()}` : "Display only — folder untouched");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to update group");
+      setError(e instanceof Error ? e.message : "Failed to update project info");
     }
   }
 
@@ -962,25 +966,40 @@ export function App() {
                 transition={{ duration: 0.2 }}
               >
                 <div>
-                  <div className="insp-section-title">Project Group</div>
-                  <div className="input-inline">
+                  <div className="insp-section-title">Display Name &amp; Group</div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                     <input
                       className="text-input"
-                      placeholder="e.g., Client A, Work, Personal..."
-                      value={inspectorGroupDraft}
-                      onChange={(e) => setInspectorGroupDraft(e.target.value)}
+                      placeholder="Display name (does not rename folder)"
+                      value={inspectorNameDraft}
+                      onChange={(e) => setInspectorNameDraft(e.target.value)}
                       onKeyDown={(e) => {
                         if (e.key === "Enter") {
-                          void handleSaveGroup(selectedProject, inspectorGroupDraft);
+                          void handleSaveMeta(selectedProject, inspectorNameDraft, inspectorGroupDraft);
                         }
                       }}
                     />
-                    <button
-                      className="btn btn-xs"
-                      onClick={() => void handleSaveGroup(selectedProject, inspectorGroupDraft)}
-                    >
-                      Save
-                    </button>
+                    <div className="input-inline">
+                      <input
+                        className="text-input"
+                        placeholder="Group (e.g., Work, Side Projects...)"
+                        value={inspectorGroupDraft}
+                        onChange={(e) => setInspectorGroupDraft(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            void handleSaveMeta(selectedProject, inspectorNameDraft, inspectorGroupDraft);
+                          }
+                        }}
+                      />
+                      <button
+                        className="btn btn-xs"
+                        onClick={() =>
+                          void handleSaveMeta(selectedProject, inspectorNameDraft, inspectorGroupDraft)
+                        }
+                      >
+                        Save
+                      </button>
+                    </div>
                   </div>
                 </div>
 

@@ -6,14 +6,17 @@ import {
   CheckCircle2,
   ClipboardList,
   Copy,
+  FolderOpen,
   FolderPlus,
   GitBranch,
   Layers,
+  Play,
   Plus,
   RefreshCw,
   Search,
   Shield,
   Sparkles,
+  Square,
   Terminal,
   Trash2,
   X,
@@ -27,6 +30,7 @@ import {
   fetchStandup,
   removeProject,
   scanFolder,
+  streamProjectExec,
   updateProjectStatus,
 } from "./core/api.ts";
 import type {
@@ -156,6 +160,13 @@ export function App() {
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<{ label: string; detail?: string } | null>(null);
 
+  // Embedded live console state
+  const [execMode, setExecMode] = useState<"agent" | "shell">("agent");
+  const [consoleOutput, setConsoleOutput] = useState("");
+  const [runningExec, setRunningExec] = useState(false);
+  const execAbortRef = useRef<AbortController | null>(null);
+  const consoleEndRef = useRef<HTMLDivElement>(null);
+
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   const showToast = useCallback((label: string, detail?: string) => {
@@ -168,23 +179,44 @@ export function App() {
     return () => window.clearTimeout(id);
   }, [toast]);
 
-  const loadAll = useCallback(async () => {
-    setLoading(true);
+  const loadAll = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     setError(null);
     try {
       const list = await fetchProjects();
       setProjects(list);
       setSelectedId((prev) => prev ?? list[0]?.id ?? null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load projects");
+      if (!silent) {
+        setError(e instanceof Error ? e.message : "Failed to load projects");
+      }
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    void loadAll();
+    void loadAll(false);
   }, [loadAll]);
+
+  // Dynamic live auto-refresh: every 15s + on window focus
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      void loadAll(true);
+    }, 15000);
+    const onFocus = () => {
+      void loadAll(true);
+    };
+    window.addEventListener("focus", onFocus);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [loadAll]);
+
+  useEffect(() => {
+    consoleEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [consoleOutput]);
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -341,6 +373,53 @@ export function App() {
     }
   }
 
+  async function handleRunExec(
+    project: ManagedProject,
+    mode: "verify" | "agent" | "shell",
+    prompt?: string,
+  ) {
+    execAbortRef.current?.abort();
+    const controller = new AbortController();
+    execAbortRef.current = controller;
+    setRunningExec(true);
+    setConsoleOutput("");
+    try {
+      await streamProjectExec(
+        project.id,
+        { mode, agent, prompt },
+        (chunk) => setConsoleOutput((prev) => prev + chunk),
+        controller.signal,
+      );
+      await loadAll(true);
+      if (mode === "verify") {
+        showToast("Verify completed", "Verification Health updated");
+      }
+    } catch (e) {
+      if (!(e instanceof DOMException && e.name === "AbortError")) {
+        setConsoleOutput((prev) => prev + `\n[error] ${e instanceof Error ? e.message : "Run failed"}\n`);
+      }
+    } finally {
+      setRunningExec(false);
+    }
+  }
+
+  function handleStopExec() {
+    execAbortRef.current?.abort();
+    setRunningExec(false);
+    setConsoleOutput((prev) => prev + "\n[stopped by user]\n");
+  }
+
+  async function handleBrowseFolder() {
+    if (!window.agentManager?.pickFolder) {
+      showToast("Folder picker requires desktop app", "Paste a path or launch from Start Menu");
+      return;
+    }
+    const picked = await window.agentManager.pickFolder();
+    if (picked) {
+      setPathInput(picked);
+    }
+  }
+
   async function handleRemove(id: string) {
     try {
       const updated = await removeProject(id);
@@ -489,6 +568,9 @@ export function App() {
             </div>
 
             <div className="header-controls">
+              <span className="live-pill" title="Auto-refreshing every 15s and on window focus">
+                <span className="live-dot" /> Live
+              </span>
               <div className="search-box">
                 <Search size={13} />
                 <input
@@ -745,65 +827,119 @@ export function App() {
                 </div>
 
                 <div>
-                  <div className="insp-section-title">Run in Your Terminal ({activeAgentObj.label})</div>
+                  <div className="insp-section-title">
+                    <span>Built-In Agent &amp; Verify Console</span>
+                    <button
+                      className="btn btn-ghost btn-xs"
+                      onClick={() => void handleCopyCmd(selectedProject)}
+                      title="Copy command to run in external terminal"
+                    >
+                      <Copy size={11} /> Copy Cmd
+                    </button>
+                  </div>
                   <div className="dispatch-card">
-                    <div className="cmd-preview" title="Click any button below to copy to clipboard">
-                      cd &apos;{selectedProject.name}&apos;; {activeAgentObj.cli}
-                    </div>
                     <div className="dispatch-pills">
                       <motion.button
                         whileTap={{ scale: 0.96 }}
                         className="btn btn-xs btn-primary"
-                        onClick={() => void handleCopyCmd(selectedProject)}
+                        disabled={runningExec}
+                        onClick={() => void handleRunExec(selectedProject, "verify")}
                       >
-                        <Copy size={11} /> Copy Open Cmd
+                        <Play size={11} /> Run Verify
                       </motion.button>
                       <motion.button
                         whileTap={{ scale: 0.96 }}
                         className="btn btn-xs"
-                        onClick={() => void handleCopyCmd(selectedProject, "/bastion recap")}
+                        disabled={runningExec}
+                        onClick={() => void handleRunExec(selectedProject, "agent", "/bastion recap")}
                       >
                         /bastion recap
                       </motion.button>
                       <motion.button
                         whileTap={{ scale: 0.96 }}
                         className="btn btn-xs"
-                        onClick={() => void handleCopyCmd(selectedProject, "/bastion harden")}
-                      >
-                        /bastion harden
-                      </motion.button>
-                      <motion.button
-                        whileTap={{ scale: 0.96 }}
-                        className="btn btn-xs"
-                        onClick={() => void handleCopyCmd(selectedProject, "/bastion audit")}
+                        disabled={runningExec}
+                        onClick={() => void handleRunExec(selectedProject, "agent", "/bastion audit")}
                       >
                         /bastion audit
                       </motion.button>
+                      {runningExec && (
+                        <button className="btn btn-xs btn-danger" onClick={handleStopExec}>
+                          <Square size={10} /> Stop
+                        </button>
+                      )}
                     </div>
+
+                    <div className="glass-segmented">
+                      <button
+                        className={`seg-option ${execMode === "agent" ? "active" : ""}`}
+                        onClick={() => setExecMode("agent")}
+                      >
+                        {execMode === "agent" && (
+                          <motion.span layoutId="exec-mode-pill" className="seg-pill-bg" transition={SPRING_SNAPPY} />
+                        )}
+                        <span className="seg-label">Ask {activeAgentObj.label}</span>
+                      </button>
+                      <button
+                        className={`seg-option ${execMode === "shell" ? "active" : ""}`}
+                        onClick={() => setExecMode("shell")}
+                      >
+                        {execMode === "shell" && (
+                          <motion.span layoutId="exec-mode-pill" className="seg-pill-bg" transition={SPRING_SNAPPY} />
+                        )}
+                        <span className="seg-label">Shell Command</span>
+                      </button>
+                    </div>
+
                     <div className="input-inline">
                       <input
                         className="text-input"
-                        placeholder={`Custom instruction for ${activeAgentObj.label}...`}
+                        placeholder={
+                          execMode === "agent"
+                            ? `Prompt ${activeAgentObj.label} in ${selectedProject.name}...`
+                            : "Run a shell command (e.g., git status, npm test)..."
+                        }
                         value={customPrompt}
                         onChange={(e) => setCustomPrompt(e.target.value)}
                         onKeyDown={(e) => {
-                          if (e.key === "Enter" && customPrompt.trim()) {
-                            void handleCopyCmd(selectedProject, customPrompt.trim());
+                          if (e.key === "Enter" && customPrompt.trim() && !runningExec) {
+                            void handleRunExec(selectedProject, execMode, customPrompt.trim());
                             setCustomPrompt("");
                           }
                         }}
                       />
                       <button
-                        className="btn btn-xs"
+                        className="btn btn-xs btn-primary"
+                        disabled={runningExec || !customPrompt.trim()}
                         onClick={() => {
                           if (!customPrompt.trim()) return;
-                          void handleCopyCmd(selectedProject, customPrompt.trim());
+                          void handleRunExec(selectedProject, execMode, customPrompt.trim());
                           setCustomPrompt("");
                         }}
                       >
-                        Copy
+                        <Play size={11} /> Run
                       </button>
                     </div>
+
+                    {consoleOutput && (
+                      <>
+                        <div className="console-header">
+                          <span style={{ fontSize: 10.5, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
+                            {runningExec ? "Streaming live output..." : "Output"}
+                          </span>
+                          <button
+                            className="btn btn-ghost btn-xs"
+                            onClick={() => setConsoleOutput("")}
+                          >
+                            Clear
+                          </button>
+                        </div>
+                        <div className="console-box">
+                          {consoleOutput}
+                          <div ref={consoleEndRef} />
+                        </div>
+                      </>
+                    )}
                   </div>
                 </div>
 
@@ -1066,20 +1202,25 @@ export function App() {
                 </button>
               </div>
 
-              <input
-                className="text-input"
-                autoFocus
-                placeholder={
-                  addMode === "scan"
-                    ? "C:\\Users\\you\\Projects (imports all git repos inside)"
-                    : "C:\\Users\\you\\Projects\\my-repo"
-                }
-                value={pathInput}
-                onChange={(e) => setPathInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") void handleAddSubmit();
-                }}
-              />
+              <div className="input-inline">
+                <input
+                  className="text-input"
+                  autoFocus
+                  placeholder={
+                    addMode === "scan"
+                      ? "C:\\Users\\you\\Projects (imports all git repos inside)"
+                      : "C:\\Users\\you\\Projects\\my-repo"
+                  }
+                  value={pathInput}
+                  onChange={(e) => setPathInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") void handleAddSubmit();
+                  }}
+                />
+                <button className="btn" onClick={() => void handleBrowseFolder()}>
+                  <FolderOpen size={14} /> Browse...
+                </button>
+              </div>
 
               <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
                 <button className="btn" onClick={() => setShowAddModal(false)}>

@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
@@ -73,6 +74,39 @@ async function readJsonBody<T>(req: http.IncomingMessage): Promise<T> {
   return (raw ? JSON.parse(raw) : {}) as T;
 }
 
+function cleanPathInput(raw: string): string {
+  return raw.trim().replace(/^["']+|["']+$/g, "").trim();
+}
+
+function stripAnsi(text: string): string {
+  // eslint-disable-next-line no-control-regex
+  return text.replace(/\u001b\[[0-9;?]*[a-zA-Z]/g, "");
+}
+
+function resolveExecCommand(
+  mode: "verify" | "agent" | "shell",
+  agent: AgentKind,
+  prompt: string | undefined,
+  verifyCmd: string | null,
+): { command: string; args: string[]; label: string } {
+  if (mode === "verify") {
+    const cmd = verifyCmd || "npm run verify";
+    return { command: cmd, args: [], label: cmd };
+  }
+  if (mode === "shell") {
+    const cmd = (prompt ?? "").trim();
+    return { command: cmd, args: [], label: cmd };
+  }
+  const cleanPrompt = (prompt ?? "").trim();
+  if (agent === "antigravity") {
+    return { command: "agy", args: cleanPrompt ? ["-p", cleanPrompt] : [], label: `agy -p "${cleanPrompt}"` };
+  }
+  if (agent === "codex") {
+    return { command: "codex", args: cleanPrompt ? ["exec", cleanPrompt] : [], label: `codex exec "${cleanPrompt}"` };
+  }
+  return { command: "claude", args: cleanPrompt ? ["-p", cleanPrompt] : [], label: `claude -p "${cleanPrompt}"` };
+}
+
 function buildAgentCommand(repoPath: string, agent: AgentKind = "claude", initialPrompt?: string): string {
   const escapedPath = repoPath.replace(/'/g, "''");
   const safePrompt = initialPrompt?.replace(/"/g, '\\"').trim();
@@ -138,11 +172,12 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "POST" && pathname === "/api/projects") {
       const body = await readJsonBody<{ path?: string; name?: string }>(req);
-      if (!body.path || !body.path.trim()) {
+      const cleaned = body.path ? cleanPathInput(body.path) : "";
+      if (!cleaned) {
         sendJson(req, res, 400, { error: "Project path is required" });
         return;
       }
-      const resolved = path.resolve(body.path.trim());
+      const resolved = path.resolve(cleaned);
       const entries = await loadProjectEntries();
       const id = createId(resolved);
       if (!entries.some((e) => e.id === id)) {
@@ -160,11 +195,12 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "POST" && pathname === "/api/projects/scan-folder") {
       const body = await readJsonBody<{ rootFolder?: string }>(req);
-      if (!body.rootFolder || !body.rootFolder.trim()) {
+      const cleaned = body.rootFolder ? cleanPathInput(body.rootFolder) : "";
+      if (!cleaned) {
         sendJson(req, res, 400, { error: "rootFolder is required" });
         return;
       }
-      const discovered = await discoverReposInFolder(body.rootFolder.trim());
+      const discovered = await discoverReposInFolder(cleaned);
       const entries = await loadProjectEntries();
       let added = 0;
       for (const item of discovered) {
@@ -222,6 +258,77 @@ const server = http.createServer(async (req, res) => {
       }
       const updated = await autoRecapProject(target);
       sendJson(req, res, 200, { project: updated });
+      return;
+    }
+
+    const execMatch = pathname.match(/^\/api\/projects\/([^/]+)\/exec$/);
+    if (req.method === "POST" && execMatch?.[1]) {
+      const id = decodeURIComponent(execMatch[1]);
+      const entries = await loadProjectEntries();
+      const target = entries.find((e) => e.id === id);
+      if (!target) {
+        sendJson(req, res, 404, { error: "Project not found" });
+        return;
+      }
+      const body = await readJsonBody<{
+        mode?: "verify" | "agent" | "shell";
+        agent?: AgentKind;
+        prompt?: string;
+      }>(req);
+
+      const mode = body.mode ?? "agent";
+      const scanned = await scanProject(target);
+      const spec = resolveExecCommand(mode, body.agent ?? "claude", body.prompt, scanned.antiSlop.verifyCmd);
+      if (!spec.command) {
+        sendJson(req, res, 400, { error: "Command is empty" });
+        return;
+      }
+
+      res.writeHead(200, {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Transfer-Encoding": "chunked",
+        "Cache-Control": "no-cache",
+        "Access-Control-Allow-Origin": corsOrigin(req),
+      });
+
+      res.write(`$ ${spec.label}\n\n`);
+
+      const useShell = mode === "verify" || mode === "shell";
+      const child = spawn(spec.command, spec.args, {
+        cwd: target.path,
+        shell: useShell,
+        windowsHide: true,
+      });
+
+      req.on("close", () => {
+        if (!child.killed) child.kill();
+      });
+
+      child.stdout?.on("data", (chunk: Buffer) => {
+        res.write(stripAnsi(chunk.toString("utf8")));
+      });
+      child.stderr?.on("data", (chunk: Buffer) => {
+        res.write(stripAnsi(chunk.toString("utf8")));
+      });
+      child.on("error", (err) => {
+        res.write(`\n[error] ${err.message}\n`);
+        res.end();
+      });
+      child.on("close", async (code) => {
+        res.write(`\n[exited with code ${code ?? -1}]\n`);
+        if (mode === "verify") {
+          try {
+            const verifyHealth = code === 0 ? "Pass" : "Fail";
+            await writeProjectStatus(target.path, {
+              ...scanned.status,
+              verify: verifyHealth,
+            });
+          } catch {
+            // ignore status write error
+          }
+        }
+        res.end();
+      });
       return;
     }
 

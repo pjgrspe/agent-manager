@@ -60,3 +60,11 @@ export interface StandupSummary {
     idle: number;
   };
 }
+
+declare global {
+  interface Window {
+    agentManager?: {
+      pickFolder: () => Promise<string | null>;
+    };
+  }
+}

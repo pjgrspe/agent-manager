@@ -230,29 +230,6 @@ const SKIP_DIRS = new Set([
   ".cache",
 ]);
 
-const PROJECT_MARKERS = [
-  ".git",
-  "package.json",
-  "pyproject.toml",
-  "Cargo.toml",
-  "go.mod",
-  "AGENTS.md",
-  "CLAUDE.md",
-];
-
-async function isProjectRoot(dir: string): Promise<{ isRepo: boolean; hasGit: boolean }> {
-  const hasGit = await pathExists(path.join(dir, ".git"));
-  if (hasGit) return { isRepo: true, hasGit: true };
-
-  for (const marker of PROJECT_MARKERS) {
-    if (marker === ".git") continue;
-    if (await pathExists(path.join(dir, marker))) {
-      return { isRepo: true, hasGit: false };
-    }
-  }
-  return { isRepo: false, hasGit: false };
-}
-
 export async function discoverReposInFolder(
   rootFolder: string,
   maxDepth = 3,
@@ -262,15 +239,15 @@ export async function discoverReposInFolder(
   const seen = new Set<string>();
 
   async function walk(dir: string, depth: number): Promise<void> {
-    const check = await isProjectRoot(dir);
-    if (check.isRepo) {
+    const hasGit = await pathExists(path.join(dir, ".git"));
+    if (hasGit) {
       const id = createId(dir);
       if (!seen.has(id)) {
         seen.add(id);
         discovered.push({ id, name: path.basename(dir), path: dir });
       }
-      // If this is a git repo (not the root scan folder itself), don't spam sub-packages
-      if (depth > 0 && check.hasGit) return;
+      // Never descend into subfolders of a git repo (prevents tracking frontend/, backend/, packages/, etc.)
+      return;
     }
 
     if (depth >= maxDepth) return;

@@ -27,6 +27,28 @@ export async function addProject(path: string, name?: string): Promise<ManagedPr
   return res.projects;
 }
 
+export interface ScanCandidate {
+  id: string;
+  name: string;
+  path: string;
+  alreadyTracked: boolean;
+}
+
+export async function previewFolder(rootFolder: string): Promise<ScanCandidate[]> {
+  const res = await requestJson<{ candidates: ScanCandidate[] }>("/projects/preview-folder", {
+    method: "POST",
+    body: JSON.stringify({ rootFolder }),
+  });
+  return res.candidates;
+}
+
+export async function addProjectsBatch(paths: string[]): Promise<{ added: number; projects: ManagedProject[] }> {
+  return requestJson<{ added: number; projects: ManagedProject[] }>("/projects/batch", {
+    method: "POST",
+    body: JSON.stringify({ paths }),
+  });
+}
+
 export async function scanFolder(
   rootFolder: string,
 ): Promise<{ added: number; alreadyTracked: number; totalFound: number; projects: ManagedProject[] }> {

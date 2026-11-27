@@ -193,6 +193,46 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (req.method === "POST" && pathname === "/api/projects/preview-folder") {
+      const body = await readJsonBody<{ rootFolder?: string }>(req);
+      const cleaned = body.rootFolder ? cleanPathInput(body.rootFolder) : "";
+      if (!cleaned) {
+        sendJson(req, res, 400, { error: "rootFolder is required" });
+        return;
+      }
+      const discovered = await discoverReposInFolder(cleaned);
+      const existing = await loadProjectEntries();
+      const existingIds = new Set(existing.map((e) => e.id));
+      sendJson(req, res, 200, {
+        candidates: discovered.map((d) => ({
+          ...d,
+          alreadyTracked: existingIds.has(d.id),
+        })),
+      });
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/projects/batch") {
+      const body = await readJsonBody<{ paths?: string[] }>(req);
+      const paths = Array.isArray(body.paths) ? body.paths : [];
+      const entries = await loadProjectEntries();
+      let added = 0;
+      for (const raw of paths) {
+        const cleaned = cleanPathInput(raw);
+        if (!cleaned) continue;
+        const resolved = path.resolve(cleaned);
+        const id = createId(resolved);
+        if (!entries.some((e) => e.id === id)) {
+          entries.push({ id, name: path.basename(resolved), path: resolved });
+          added++;
+        }
+      }
+      await saveProjectEntries(entries);
+      const scanned = await Promise.all(entries.map(scanProject));
+      sendJson(req, res, 200, { added, projects: scanned });
+      return;
+    }
+
     if (req.method === "POST" && pathname === "/api/projects/scan-folder") {
       const body = await readJsonBody<{ rootFolder?: string }>(req);
       const cleaned = body.rootFolder ? cleanPathInput(body.rootFolder) : "";

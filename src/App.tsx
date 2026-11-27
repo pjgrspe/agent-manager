@@ -23,15 +23,17 @@ import {
 } from "lucide-react";
 import {
   addProject,
+  addProjectsBatch,
   autoRecapAll,
   autoRecapOne,
   buildAgentCommand,
   fetchProjects,
   fetchStandup,
+  previewFolder,
   removeProject,
-  scanFolder,
   streamProjectExec,
   updateProjectStatus,
+  type ScanCandidate,
 } from "./core/api.ts";
 import type {
   AgentKind,
@@ -150,6 +152,8 @@ export function App() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [addMode, setAddMode] = useState<"single" | "scan">("scan");
   const [pathInput, setPathInput] = useState("");
+  const [scanCandidates, setScanCandidates] = useState<ScanCandidate[] | null>(null);
+  const [selectedCandidates, setSelectedCandidates] = useState<Set<string>>(new Set());
   const [standup, setStandup] = useState<StandupSummary | null>(null);
   const [copiedStandup, setCopiedStandup] = useState(false);
 
@@ -288,22 +292,35 @@ export function App() {
         const updated = await addProject(pathInput.trim());
         setProjects(updated);
         showToast("Repository added", pathInput.trim());
+        setPathInput("");
+        setShowAddModal(false);
       } else {
-        const res = await scanFolder(pathInput.trim());
-        setProjects(res.projects);
-        if (res.added > 0) {
-          const extra = res.alreadyTracked > 0 ? ` (${res.alreadyTracked} already tracked)` : "";
-          showToast(`Imported ${res.added} project(s)${extra}`, pathInput.trim());
-        } else if (res.alreadyTracked > 0) {
-          showToast(`All ${res.alreadyTracked} project(s) already tracked`, pathInput.trim());
-        } else {
-          showToast("No projects found in folder", "Try 'Single Repo Path' to add any folder directly");
+        const candidates = await previewFolder(pathInput.trim());
+        setScanCandidates(candidates);
+        setSelectedCandidates(new Set(candidates.filter((c) => !c.alreadyTracked).map((c) => c.path)));
+        if (candidates.length === 0) {
+          showToast("No Git repos found in folder", "Switch to 'Single Repo Path' to add a non-git folder");
         }
       }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to scan folder");
+    }
+  }
+
+  async function handleConfirmImport() {
+    const chosen = Array.from(selectedCandidates);
+    if (chosen.length === 0) return;
+    setError(null);
+    try {
+      const res = await addProjectsBatch(chosen);
+      setProjects(res.projects);
+      showToast(`Imported ${res.added} repository(s)`);
       setPathInput("");
+      setScanCandidates(null);
+      setSelectedCandidates(new Set());
       setShowAddModal(false);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to add project");
+      setError(e instanceof Error ? e.message : "Failed to import selected repositories");
     }
   }
 
@@ -761,13 +778,23 @@ export function App() {
                   <h2>{selectedProject.name}</h2>
                   <div className="inspector-path">{selectedProject.path}</div>
                 </div>
-                <button
-                  className="btn btn-ghost btn-xs"
-                  onClick={() => setSelectedId(null)}
-                  title="Close inspector (Esc)"
-                >
-                  <X size={15} />
-                </button>
+                <div style={{ display: "flex", gap: 4 }}>
+                  <button
+                    className="btn btn-ghost btn-xs"
+                    onClick={() => void handleRemove(selectedProject.id)}
+                    title="Untrack repository (keeps files on disk)"
+                    style={{ color: "var(--rose)" }}
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                  <button
+                    className="btn btn-ghost btn-xs"
+                    onClick={() => setSelectedId(null)}
+                    title="Close inspector (Esc)"
+                  >
+                    <X size={15} />
+                  </button>
+                </div>
               </div>
 
               <motion.div
@@ -1229,13 +1256,68 @@ export function App() {
                 </button>
               </div>
 
+              {scanCandidates && scanCandidates.length > 0 && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  <div className="insp-section-title" style={{ marginBottom: 2 }}>
+                    <span>Found {scanCandidates.length} Git Repo(s) — Select to Import</span>
+                    <span>{selectedCandidates.size} selected</span>
+                  </div>
+                  <div className="checklist" style={{ maxHeight: 220, overflowY: "auto" }}>
+                    {scanCandidates.map((c) => {
+                      const checked = selectedCandidates.has(c.path);
+                      return (
+                        <div key={c.id} className="check-row">
+                          <button
+                            className={`check-toggle ${checked ? "checked" : ""}`}
+                            disabled={c.alreadyTracked}
+                            onClick={() => {
+                              setSelectedCandidates((prev) => {
+                                const next = new Set(prev);
+                                if (next.has(c.path)) next.delete(c.path);
+                                else next.add(c.path);
+                                return next;
+                              });
+                            }}
+                          >
+                            {checked && <Check size={11} strokeWidth={3} />}
+                          </button>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontWeight: 550 }}>{c.name}</div>
+                            <div className="inspector-path" style={{ marginTop: 0 }}>{c.path}</div>
+                          </div>
+                          {c.alreadyTracked && (
+                            <span className="mono-tag">Tracked</span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
               <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-                <button className="btn" onClick={() => setShowAddModal(false)}>
+                <button
+                  className="btn"
+                  onClick={() => {
+                    setShowAddModal(false);
+                    setScanCandidates(null);
+                  }}
+                >
                   Cancel
                 </button>
-                <button className="btn btn-primary" onClick={() => void handleAddSubmit()}>
-                  {addMode === "scan" ? "Scan & Import" : "Add Repository"}
-                </button>
+                {addMode === "scan" && scanCandidates && scanCandidates.length > 0 ? (
+                  <button
+                    className="btn btn-primary"
+                    disabled={selectedCandidates.size === 0}
+                    onClick={() => void handleConfirmImport()}
+                  >
+                    Import Selected ({selectedCandidates.size})
+                  </button>
+                ) : (
+                  <button className="btn btn-primary" onClick={() => void handleAddSubmit()}>
+                    {addMode === "scan" ? "Preview Repos" : "Add Repository"}
+                  </button>
+                )}
               </div>
             </motion.div>
           </motion.div>

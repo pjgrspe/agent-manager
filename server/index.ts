@@ -363,6 +363,10 @@ const server = http.createServer(async (req, res) => {
 
       const mode = body.mode ?? "agent";
       const scanned = await scanProject(target);
+      if (!scanned.exists) {
+        sendJson(req, res, 400, { error: `Directory not found on disk: ${target.path}` });
+        return;
+      }
       const effectiveVerify =
         scanned.antiSlop.verifyCmd ?? (mode === "verify" ? await detectVerifyCommand(target.path) : null);
       if (mode === "verify" && !effectiveVerify) {
@@ -381,10 +385,14 @@ const server = http.createServer(async (req, res) => {
         return;
       }
 
+      req.setTimeout(0);
+      res.setTimeout(0);
+
       res.writeHead(200, {
         "Content-Type": "text/plain; charset=utf-8",
         "Transfer-Encoding": "chunked",
         "Cache-Control": "no-cache",
+        "X-Accel-Buffering": "no",
         "Access-Control-Allow-Origin": corsOrigin(req),
       });
 
@@ -395,10 +403,13 @@ const server = http.createServer(async (req, res) => {
         cwd: target.path,
         shell: useShell,
         windowsHide: true,
+        stdio: ["ignore", "pipe", "pipe"],
       });
 
-      req.on("close", () => {
-        if (!child.killed) child.kill();
+      res.on("close", () => {
+        if (!res.writableEnded && !child.killed) {
+          child.kill();
+        }
       });
 
       child.stdout?.on("data", (chunk: Buffer) => {

@@ -1333,6 +1333,94 @@ textarea {
   gap: 7px;
 }
 
+/* Unified Collapsible Group Card */
+.group-card {
+  position: relative;
+  background: var(--glass);
+  backdrop-filter: blur(22px);
+  -webkit-backdrop-filter: blur(22px);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: var(--specular), 0 8px 28px rgba(0, 0, 0, 0.28);
+  overflow: hidden;
+  transition: border-color 150ms var(--ease);
+}
+
+.group-card:hover {
+  border-color: var(--border-strong);
+}
+
+.group-card::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 12px;
+  bottom: 12px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--text-muted);
+  opacity: 0.45;
+}
+
+.group-card.state-active::before { background: var(--sky); opacity: 0.95; }
+.group-card.state-review::before { background: var(--amber); opacity: 0.95; }
+.group-card.state-blocked::before { background: var(--rose); opacity: 1; }
+
+.group-card-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 15px 18px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  transition: background 140ms var(--ease);
+}
+
+.group-card-head:hover {
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.group-card-title {
+  font-size: 15.5px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+
+.group-card-body {
+  border-top: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.22);
+  display: flex;
+  flex-direction: column;
+}
+
+.group-child-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 12px 14px;
+  align-items: center;
+  padding: 12px 18px 12px 22px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  transition: background 140ms var(--ease);
+}
+
+.group-child-row:last-child {
+  border-bottom: none;
+}
+
+.group-child-row:hover {
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.group-child-row.selected {
+  background: rgba(255, 255, 255, 0.08);
+}
+
 /* Executive Standup Briefing Modal */
 .standup-modal {
   width: min(680px, 94vw);

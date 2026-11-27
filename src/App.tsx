@@ -4,6 +4,7 @@ import {
   AlertTriangle,
   Check,
   CheckCircle2,
+  ChevronDown,
   ClipboardList,
   Copy,
   FolderOpen,
@@ -159,6 +160,7 @@ export function App() {
   const [pathInput, setPathInput] = useState("");
   const [groupInput, setGroupInput] = useState("");
   const [activeGroup, setActiveGroup] = useState<string | null>(null);
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [inspectorNameDraft, setInspectorNameDraft] = useState("");
   const [inspectorGroupDraft, setInspectorGroupDraft] = useState("");
   const [scanCandidates, setScanCandidates] = useState<ScanCandidate[] | null>(null);
@@ -839,117 +841,301 @@ export function App() {
               </div>
             ) : (
               <div className="project-list">
-                {groupedProjects.map(([groupName, groupItems]) => (
-                  <div key={groupName} className="group-section">
-                    {(groupedProjects.length > 1 || groupName !== "Ungrouped") && (
-                      <div className="group-header">
-                        <span className="group-header-left">
-                          <FolderOpen size={12} />
-                          {groupName}
-                        </span>
-                        <span className="nav-count">{groupItems.length}</span>
-                      </div>
-                    )}
-                    <AnimatePresence mode="popLayout">
-                      {groupItems.map((project, index) => {
-                        const meta = stateMeta(project.status.state);
-                        const doneCount = project.status.plan.filter((p) => p.done).length;
-                        const totalPlan = project.status.plan.length;
-                        const planPct = totalPlan > 0 ? Math.round((doneCount / totalPlan) * 100) : 0;
-                        const nextPlan = project.status.plan.find((p) => !p.done);
-                        const latestRecap =
-                          project.status.recap[0] ??
-                          project.git.recentCommits[0]?.subject ??
-                          "Click Sync Recap to pull latest Git activity";
+                {groupedProjects.map(([groupName, groupItems]) => {
+                  const isCollapsibleGroup = groupName !== "Ungrouped" && groupItems.length > 1;
 
-                        return (
-                          <motion.article
-                            layout
-                            key={project.id}
-                            initial={{ opacity: 0, y: 12, scale: 0.99 }}
-                            animate={{ opacity: 1, y: 0, scale: 1 }}
-                            exit={{ opacity: 0, scale: 0.97 }}
-                            transition={{
-                              ...SPRING_SMOOTH,
-                              delay: Math.min(index * 0.035, 0.2),
-                            }}
-                            whileHover={{ y: -1 }}
-                            className={`project-card ${meta.row} ${
-                              selectedId === project.id ? "selected" : ""
-                            }`}
-                            onClick={() => setSelectedId(project.id)}
-                          >
-                            <ProgressRing
-                              percent={totalPlan > 0 ? planPct : project.status.verify === "Pass" ? 100 : 15}
-                              size={40}
-                              stroke={3}
-                              color={meta.color}
-                              label={totalPlan > 0 ? `${doneCount}/${totalPlan}` : "—"}
-                            />
+                  if (isCollapsibleGroup) {
+                    const isOpen = expandedGroups.has(groupName) || activeGroup === groupName || Boolean(search.trim());
+                    const blockedCount = groupItems.filter((p) => isProjectBlocked(p)).length;
+                    const reviewCount = groupItems.filter((p) => p.status.state === "Waiting on Review").length;
+                    const activeCount = groupItems.filter((p) => p.status.state === "Active").length;
+                    const dirtyTotal = groupItems.reduce((sum, p) => sum + p.git.dirtyCount, 0);
+                    const guardedCount = groupItems.filter((p) => p.antiSlop.hasSkill).length;
+                    const firstBlocker = groupItems.find((p) => p.status.blockers.length > 0)?.status.blockers[0];
 
-                            <div style={{ minWidth: 0 }}>
-                              <div className="row-top">
-                                <span className="row-name">{project.name}</span>
-                                <span className={meta.pill}>{project.status.state}</span>
-                                {project.git.isGitRepo && (
-                                  <span className={`mono-tag ${project.git.dirtyCount > 0 ? "dirty" : ""}`}>
-                                    <GitBranch size={11} />
-                                    {project.git.branch}
-                                    {project.git.dirtyCount > 0 ? ` · ${project.git.dirtyCount} dirty` : ""}
-                                  </span>
-                                )}
-                                {project.status.verify === "Pass" && (
-                                  <span className="pill-badge pill-pass">Verify Pass</span>
-                                )}
-                                {project.antiSlop.hasSkill && (
-                                  <span className="mono-tag" title="Bastion guardrails active">
-                                    <Shield size={11} color="#34d399" /> Bastion
-                                  </span>
-                                )}
-                              </div>
+                    const groupState: ProjectState =
+                      blockedCount > 0
+                        ? "Blocked"
+                        : reviewCount > 0
+                          ? "Waiting on Review"
+                          : activeCount > 0
+                            ? "Active"
+                            : "Idle";
+                    const groupMeta = stateMeta(groupState);
 
-                              <div className="row-details">
+                    return (
+                      <motion.div
+                        layout
+                        key={`group-${groupName}`}
+                        className={`group-card ${groupMeta.row}`}
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={SPRING_SMOOTH}
+                      >
+                        <button
+                          className="group-card-head"
+                          onClick={() => {
+                            setExpandedGroups((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(groupName)) next.delete(groupName);
+                              else next.add(groupName);
+                              return next;
+                            });
+                          }}
+                        >
+                          <div style={{ minWidth: 0 }}>
+                            <div className="row-top">
+                              <FolderOpen size={15} color={groupMeta.color} />
+                              <span className="group-card-title">{groupName}</span>
+                              <span className="mono-tag">{groupItems.length} repos</span>
+                              {blockedCount > 0 && (
+                                <span className="pill-badge pill-blocked">{blockedCount} Blocked</span>
+                              )}
+                              {reviewCount > 0 && (
+                                <span className="pill-badge pill-review">{reviewCount} Review</span>
+                              )}
+                              {activeCount > 0 && (
+                                <span className="pill-badge pill-active">{activeCount} Active</span>
+                              )}
+                              {dirtyTotal > 0 && (
+                                <span className="mono-tag dirty">{dirtyTotal} dirty</span>
+                              )}
+                              {guardedCount > 0 && (
+                                <span className="mono-tag">
+                                  <Shield size={11} color="#34d399" /> {guardedCount}/{groupItems.length}
+                                </span>
+                              )}
+                            </div>
+
+                            {!isOpen && (
+                              <div className="row-details" style={{ marginTop: 6 }}>
                                 <div className="row-line">
-                                  <span className="row-line-label">Recent</span>
-                                  <span className="row-line-text">{latestRecap}</span>
-                                </div>
-                                <div className="row-line">
-                                  <span className="row-line-label">Next up</span>
+                                  <span className="row-line-label">Repos</span>
                                   <span className="row-line-text">
-                                    {nextPlan ? nextPlan.text : "All milestones done — add next goal"}
+                                    {groupItems.map((p) => p.name).join(" · ")}
                                   </span>
                                 </div>
-                                {project.status.blockers.length > 0 && (
+                                {firstBlocker && (
                                   <div className="row-blocker">
                                     <AlertTriangle size={12} />
-                                    <span className="row-line-text">{project.status.blockers[0]}</span>
+                                    <span className="row-line-text">{firstBlocker}</span>
                                   </div>
                                 )}
                               </div>
-                            </div>
+                            )}
+                          </div>
 
-                            <div className="row-actions" onClick={(e) => e.stopPropagation()}>
-                              <motion.button
-                                whileTap={{ scale: 0.96 }}
-                                className="btn btn-xs btn-primary"
-                                onClick={() => void handleCopyCmd(project)}
-                              >
-                                <Terminal size={11} /> Copy {activeAgentObj.label}
-                              </motion.button>
-                              <motion.button
-                                whileTap={{ scale: 0.96 }}
-                                className="btn btn-xs"
-                                onClick={() => void handleAutoRecapOne(project)}
-                              >
-                                <RefreshCw size={11} /> Sync Recap
-                              </motion.button>
-                            </div>
-                          </motion.article>
-                        );
-                      })}
-                    </AnimatePresence>
-                  </div>
-                ))}
+                          <motion.span
+                            animate={{ rotate: isOpen ? 180 : 0 }}
+                            transition={SPRING_SNAPPY}
+                            style={{ color: "var(--text-muted)", flexShrink: 0, display: "grid", placeItems: "center" }}
+                          >
+                            <ChevronDown size={16} />
+                          </motion.span>
+                        </button>
+
+                        <AnimatePresence initial={false}>
+                          {isOpen && (
+                            <motion.div
+                              className="group-card-body"
+                              initial={{ height: 0, opacity: 0 }}
+                              animate={{ height: "auto", opacity: 1 }}
+                              exit={{ height: 0, opacity: 0 }}
+                              transition={{ duration: 0.22, ease: [0.2, 0.8, 0.2, 1] }}
+                            >
+                              {groupItems.map((project) => {
+                                const meta = stateMeta(project.status.state);
+                                const doneCount = project.status.plan.filter((p) => p.done).length;
+                                const totalPlan = project.status.plan.length;
+                                const planPct = totalPlan > 0 ? Math.round((doneCount / totalPlan) * 100) : 0;
+                                const nextPlan = project.status.plan.find((p) => !p.done);
+                                const latestRecap =
+                                  project.status.recap[0] ??
+                                  project.git.recentCommits[0]?.subject ??
+                                  "Click Sync Recap to pull latest Git activity";
+
+                                return (
+                                  <div
+                                    key={project.id}
+                                    className={`group-child-row ${selectedId === project.id ? "selected" : ""}`}
+                                    onClick={() => setSelectedId(project.id)}
+                                  >
+                                    <ProgressRing
+                                      percent={totalPlan > 0 ? planPct : project.status.verify === "Pass" ? 100 : 15}
+                                      size={34}
+                                      stroke={3}
+                                      color={meta.color}
+                                      label={totalPlan > 0 ? `${doneCount}/${totalPlan}` : "—"}
+                                    />
+                                    <div style={{ minWidth: 0 }}>
+                                      <div className="row-top">
+                                        <span className="row-name">{project.name}</span>
+                                        <span className={meta.pill}>{project.status.state}</span>
+                                        {project.git.isGitRepo && (
+                                          <span className={`mono-tag ${project.git.dirtyCount > 0 ? "dirty" : ""}`}>
+                                            <GitBranch size={11} />
+                                            {project.git.branch}
+                                            {project.git.dirtyCount > 0 ? ` · ${project.git.dirtyCount} dirty` : ""}
+                                          </span>
+                                        )}
+                                        {project.status.verify === "Pass" && (
+                                          <span className="pill-badge pill-pass">Verify Pass</span>
+                                        )}
+                                        {project.antiSlop.hasSkill && (
+                                          <span className="mono-tag">
+                                            <Shield size={11} color="#34d399" /> Bastion
+                                          </span>
+                                        )}
+                                      </div>
+                                      <div className="row-details" style={{ marginTop: 5 }}>
+                                        <div className="row-line">
+                                          <span className="row-line-label">Recent</span>
+                                          <span className="row-line-text">{latestRecap}</span>
+                                        </div>
+                                        {nextPlan && (
+                                          <div className="row-line">
+                                            <span className="row-line-label">Next up</span>
+                                            <span className="row-line-text">{nextPlan.text}</span>
+                                          </div>
+                                        )}
+                                        {project.status.blockers.length > 0 && (
+                                          <div className="row-blocker">
+                                            <AlertTriangle size={12} />
+                                            <span className="row-line-text">{project.status.blockers[0]}</span>
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+                                    <div className="row-actions" onClick={(e) => e.stopPropagation()}>
+                                      <motion.button
+                                        whileTap={{ scale: 0.96 }}
+                                        className="btn btn-xs btn-primary"
+                                        onClick={() => void handleCopyCmd(project)}
+                                      >
+                                        <Terminal size={11} /> Copy {activeAgentObj.label}
+                                      </motion.button>
+                                      <motion.button
+                                        whileTap={{ scale: 0.96 }}
+                                        className="btn btn-xs"
+                                        onClick={() => void handleAutoRecapOne(project)}
+                                      >
+                                        <RefreshCw size={11} /> Sync Recap
+                                      </motion.button>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                      </motion.div>
+                    );
+                  }
+
+                  return (
+                    <div key={groupName} className="group-section" style={{ marginBottom: 0 }}>
+                      <AnimatePresence mode="popLayout">
+                        {groupItems.map((project, index) => {
+                          const meta = stateMeta(project.status.state);
+                          const doneCount = project.status.plan.filter((p) => p.done).length;
+                          const totalPlan = project.status.plan.length;
+                          const planPct = totalPlan > 0 ? Math.round((doneCount / totalPlan) * 100) : 0;
+                          const nextPlan = project.status.plan.find((p) => !p.done);
+                          const latestRecap =
+                            project.status.recap[0] ??
+                            project.git.recentCommits[0]?.subject ??
+                            "Click Sync Recap to pull latest Git activity";
+
+                          return (
+                            <motion.article
+                              layout
+                              key={project.id}
+                              initial={{ opacity: 0, y: 12, scale: 0.99 }}
+                              animate={{ opacity: 1, y: 0, scale: 1 }}
+                              exit={{ opacity: 0, scale: 0.97 }}
+                              transition={{
+                                ...SPRING_SMOOTH,
+                                delay: Math.min(index * 0.035, 0.2),
+                              }}
+                              whileHover={{ y: -1 }}
+                              className={`project-card ${meta.row} ${
+                                selectedId === project.id ? "selected" : ""
+                              }`}
+                              onClick={() => setSelectedId(project.id)}
+                            >
+                              <ProgressRing
+                                percent={totalPlan > 0 ? planPct : project.status.verify === "Pass" ? 100 : 15}
+                                size={40}
+                                stroke={3}
+                                color={meta.color}
+                                label={totalPlan > 0 ? `${doneCount}/${totalPlan}` : "—"}
+                              />
+
+                              <div style={{ minWidth: 0 }}>
+                                <div className="row-top">
+                                  <span className="row-name">{project.name}</span>
+                                  {project.group && <span className="mono-tag">{project.group}</span>}
+                                  <span className={meta.pill}>{project.status.state}</span>
+                                  {project.git.isGitRepo && (
+                                    <span className={`mono-tag ${project.git.dirtyCount > 0 ? "dirty" : ""}`}>
+                                      <GitBranch size={11} />
+                                      {project.git.branch}
+                                      {project.git.dirtyCount > 0 ? ` · ${project.git.dirtyCount} dirty` : ""}
+                                    </span>
+                                  )}
+                                  {project.status.verify === "Pass" && (
+                                    <span className="pill-badge pill-pass">Verify Pass</span>
+                                  )}
+                                  {project.antiSlop.hasSkill && (
+                                    <span className="mono-tag" title="Bastion guardrails active">
+                                      <Shield size={11} color="#34d399" /> Bastion
+                                    </span>
+                                  )}
+                                </div>
+
+                                <div className="row-details">
+                                  <div className="row-line">
+                                    <span className="row-line-label">Recent</span>
+                                    <span className="row-line-text">{latestRecap}</span>
+                                  </div>
+                                  <div className="row-line">
+                                    <span className="row-line-label">Next up</span>
+                                    <span className="row-line-text">
+                                      {nextPlan ? nextPlan.text : "All milestones done — add next goal"}
+                                    </span>
+                                  </div>
+                                  {project.status.blockers.length > 0 && (
+                                    <div className="row-blocker">
+                                      <AlertTriangle size={12} />
+                                      <span className="row-line-text">{project.status.blockers[0]}</span>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+
+                              <div className="row-actions" onClick={(e) => e.stopPropagation()}>
+                                <motion.button
+                                  whileTap={{ scale: 0.96 }}
+                                  className="btn btn-xs btn-primary"
+                                  onClick={() => void handleCopyCmd(project)}
+                                >
+                                  <Terminal size={11} /> Copy {activeAgentObj.label}
+                                </motion.button>
+                                <motion.button
+                                  whileTap={{ scale: 0.96 }}
+                                  className="btn btn-xs"
+                                  onClick={() => void handleAutoRecapOne(project)}
+                                >
+                                  <RefreshCw size={11} /> Sync Recap
+                                </motion.button>
+                              </div>
+                            </motion.article>
+                          );
+                        })}
+                      </AnimatePresence>
+                    </div>
+                  );
+                })}
               </div>
             )}
               </>

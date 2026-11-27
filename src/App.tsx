@@ -9,6 +9,7 @@ import {
   FolderOpen,
   FolderPlus,
   GitBranch,
+  LayoutDashboard,
   Layers,
   Play,
   Plus,
@@ -21,6 +22,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import { ControlCenter } from "./components/ControlCenter.tsx";
 import {
   addProject,
   addProjectsBatch,
@@ -43,7 +45,7 @@ import type {
   VerifyHealth,
 } from "./core/types.ts";
 
-type FilterState = "All" | ProjectState;
+type FilterState = "ControlCenter" | "All" | ProjectState;
 
 const SPRING_SNAPPY = { type: "spring" as const, stiffness: 460, damping: 34 };
 const SPRING_SMOOTH = { type: "spring" as const, stiffness: 320, damping: 30 };
@@ -141,7 +143,7 @@ export function App() {
   const [projects, setProjects] = useState<ManagedProject[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [filter, setFilter] = useState<FilterState>("All");
+  const [filter, setFilter] = useState<FilterState>("ControlCenter");
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [agent, setAgent] = useState<AgentKind>(() => {
@@ -257,7 +259,7 @@ export function App() {
 
   const filteredProjects = useMemo(() => {
     return projects.filter((p) => {
-      if (filter !== "All" && p.status.state !== filter) return false;
+      if (filter !== "All" && filter !== "ControlCenter" && p.status.state !== filter) return false;
       if (search.trim()) {
         const q = search.toLowerCase();
         return p.name.toLowerCase().includes(q) || p.path.toLowerCase().includes(q);
@@ -471,14 +473,32 @@ export function App() {
               <Layers size={15} strokeWidth={2.3} />
             </span>
             <div>
-              <div className="brand-title">Agent Manager</div>
-              <div className="brand-sub">Command Center</div>
+              <div className="brand-title">Citadel</div>
+              <div className="brand-sub">Control Center</div>
             </div>
           </div>
 
           <div>
             <div className="rail-section-label">Workspace Views</div>
             <nav className="rail-nav">
+              <button
+                className={`nav-item ${filter === "ControlCenter" ? "active" : ""}`}
+                onClick={() => setFilter("ControlCenter")}
+              >
+                {filter === "ControlCenter" && (
+                  <motion.span
+                    layoutId="nav-active-pill"
+                    className="nav-pill-bg"
+                    transition={SPRING_SNAPPY}
+                  />
+                )}
+                <span className="nav-content">
+                  <span className="nav-left">
+                    <LayoutDashboard size={13} color="#38bdf8" />
+                    Control Center
+                  </span>
+                </span>
+              </button>
               {(
                 [
                   { id: "All", label: "All Projects", count: stats.total, dot: "dot-all" },
@@ -585,9 +605,17 @@ export function App() {
         <section className="main-pane">
           <header className="main-header">
             <div className="header-title-group">
-              <h1>{filter === "All" ? "All Projects" : filter}</h1>
+              <h1>
+                {filter === "ControlCenter"
+                  ? "Control Center"
+                  : filter === "All"
+                    ? "All Projects"
+                    : filter}
+              </h1>
               <span className="header-count">
-                {filteredProjects.length} {filteredProjects.length === 1 ? "repo" : "repos"}
+                {filter === "ControlCenter"
+                  ? `${stats.total} tracked`
+                  : `${filteredProjects.length} ${filteredProjects.length === 1 ? "repo" : "repos"}`}
               </span>
             </div>
 
@@ -620,6 +648,17 @@ export function App() {
           <div className="main-scroll">
             {error && <div className="banner-error">{error}</div>}
 
+            {filter === "ControlCenter" ? (
+              <ControlCenter
+                projects={projects}
+                onSelectProject={(id) => setSelectedId(id)}
+                onJumpFilter={(next) => setFilter(next)}
+                onOpenStandup={() => void handleOpenStandup()}
+                onSyncAll={() => void handleAutoRecapAll()}
+                loading={loading}
+              />
+            ) : (
+              <>
             {/* Today at a Glance Hero */}
             <motion.div
               className="hero-brief"
@@ -758,6 +797,8 @@ export function App() {
                   })}
                 </AnimatePresence>
               </div>
+            )}
+              </>
             )}
           </div>
         </section>

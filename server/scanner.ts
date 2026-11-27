@@ -100,7 +100,7 @@ async function inspectGit(repoPath: string): Promise<ProjectGitData> {
   const [branchOut, statusOut, logOut] = await Promise.all([
     runGit(repoPath, ["rev-parse", "--abbrev-ref", "HEAD"]),
     runGit(repoPath, ["status", "--porcelain"]),
-    runGit(repoPath, ["log", "-n", "5", "--pretty=format:%h|%cs|%s"]),
+    runGit(repoPath, ["log", "-n", "20", "--pretty=format:%h|%cs|%s"]),
   ]);
 
   const dirtyCount = statusOut ? statusOut.split(/\r?\n/).filter(Boolean).length : 0;

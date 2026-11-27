@@ -1,6 +1,6 @@
-# Agent Manager — Multi-Project Command Center
+# Citadel — Multi-Project Control Center
 
-A lightweight Windows desktop & local web dashboard for managing multiple repositories across **any coding agent** (**Claude Code, Antigravity, Codex, Cursor**) and `pjgrspe/bastion`.
+A lightweight Windows desktop & local web Control Center for managing multiple repositories across **any coding agent** (**Claude Code, Antigravity, Codex, Cursor**) and [`pjgrspe/bastion`](https://github.com/pjgrspe/bastion).
 
 ## Run Modes
 

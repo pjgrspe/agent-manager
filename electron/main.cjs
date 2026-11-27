@@ -52,7 +52,7 @@ async function createWindow() {
     minWidth: 960,
     minHeight: 640,
     backgroundColor: "#0b0e14",
-    title: "Agent Manager — Multi-Project Command Center",
+    title: "Citadel — Control Center",
     autoHideMenuBar: true,
     webPreferences: {
       contextIsolation: true,

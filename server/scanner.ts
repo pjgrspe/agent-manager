@@ -9,6 +9,7 @@ import {
   parseStatusMarkdown,
   serializeStatusMarkdown,
 } from "../src/core/statusParser.ts";
+import { readClaudeProjectSync } from "./claudeReader.ts";
 import type {
   AntiSlopInfo,
   GitCommitSummary,
@@ -207,11 +208,19 @@ export async function scanProject(entry: StoredProjectEntry): Promise<ManagedPro
     };
   }
 
-  const [status, git, antiSlop] = await Promise.all([
+  const [status, git, antiSlop, claudeSync] = await Promise.all([
     inspectStatus(entry.path),
     inspectGit(entry.path),
     inspectAntiSlop(entry.path),
+    readClaudeProjectSync(entry.path),
   ]);
+
+  // If .agents/status.md has no plan or blockers yet, surface live Claude session todos & memory flags
+  const enrichedStatus: ProjectStatusData = {
+    ...status,
+    plan: status.plan.length > 0 ? status.plan : claudeSync.sessionTodos,
+    blockers: status.blockers.length > 0 ? status.blockers : claudeSync.memoryFlags,
+  };
 
   return {
     id: entry.id,
@@ -219,9 +228,10 @@ export async function scanProject(entry: StoredProjectEntry): Promise<ManagedPro
     path: entry.path,
     group: entry.group,
     exists: true,
-    status,
+    status: enrichedStatus,
     git,
     antiSlop,
+    claudeSync,
   };
 }
 

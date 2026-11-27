@@ -1093,6 +1093,31 @@ export function App() {
                   </div>
                 </div>
 
+                {selectedProject.claudeSync?.found && (
+                  <div>
+                    <div className="insp-section-title">
+                      <span>Claude Code Live Sync</span>
+                      <span className="pill-badge pill-active">
+                        {selectedProject.claudeSync.memoryCount} memories
+                      </span>
+                    </div>
+                    <div className="dispatch-card">
+                      <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+                        Last Claude session:{" "}
+                        <span style={{ fontFamily: "var(--font-mono)", color: "var(--text)" }}>
+                          {selectedProject.claudeSync.lastSessionAt
+                            ? new Date(selectedProject.claudeSync.lastSessionAt).toLocaleString()
+                            : "Unknown"}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: 11.5, color: "var(--text-muted)" }}>
+                        {selectedProject.claudeSync.sessionTodos.length} live session task(s) ·{" "}
+                        {selectedProject.claudeSync.memoryFlags.length} memory flag(s) detected
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 <div>
                   <div className="insp-section-title">
                     <span>Bastion Guardrails</span>

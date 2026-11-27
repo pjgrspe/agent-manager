@@ -39,6 +39,14 @@ export interface AntiSlopInfo {
   skillCount: number;
 }
 
+export interface ClaudeSyncData {
+  found: boolean;
+  lastSessionAt: string | null;
+  sessionTodos: PlanItem[];
+  memoryFlags: string[];
+  memoryCount: number;
+}
+
 export interface ManagedProject {
   id: string;
   name: string;
@@ -48,6 +56,7 @@ export interface ManagedProject {
   status: ProjectStatusData;
   git: ProjectGitData;
   antiSlop: AntiSlopInfo;
+  claudeSync?: ClaudeSyncData;
 }
 
 export interface StandupSummary {

@@ -196,7 +196,7 @@ export function App() {
     try {
       const list = await fetchProjects();
       setProjects(list);
-      setSelectedId((prev) => prev ?? list[0]?.id ?? null);
+      setSelectedId((prev) => (prev && list.some((p) => p.id === prev) ? prev : null));
     } catch (e) {
       if (!silent) {
         setError(e instanceof Error ? e.message : "Failed to load projects");
@@ -520,7 +520,7 @@ export function App() {
     try {
       const updated = await removeProject(id);
       setProjects(updated);
-      if (selectedId === id) setSelectedId(updated[0]?.id ?? null);
+      if (selectedId === id) setSelectedId(null);
       showToast("Removed from dashboard", "Local files untouched");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to remove project");

@@ -27,11 +27,16 @@ export async function addProject(path: string, name?: string): Promise<ManagedPr
   return res.projects;
 }
 
-export async function scanFolder(rootFolder: string): Promise<{ added: number; projects: ManagedProject[] }> {
-  return requestJson<{ added: number; projects: ManagedProject[] }>("/projects/scan-folder", {
-    method: "POST",
-    body: JSON.stringify({ rootFolder }),
-  });
+export async function scanFolder(
+  rootFolder: string,
+): Promise<{ added: number; alreadyTracked: number; totalFound: number; projects: ManagedProject[] }> {
+  return requestJson<{ added: number; alreadyTracked: number; totalFound: number; projects: ManagedProject[] }>(
+    "/projects/scan-folder",
+    {
+      method: "POST",
+      body: JSON.stringify({ rootFolder }),
+    },
+  );
 }
 
 export async function removeProject(id: string): Promise<ManagedProject[]> {

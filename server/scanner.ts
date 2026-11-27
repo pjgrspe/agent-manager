@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -70,7 +71,11 @@ export async function saveProjectEntries(entries: StoredProjectEntry[]): Promise
 }
 
 export function createId(repoPath: string): string {
-  return Buffer.from(path.resolve(repoPath).toLowerCase()).toString("base64url").slice(0, 16);
+  return crypto
+    .createHash("sha256")
+    .update(path.resolve(repoPath).toLowerCase())
+    .digest("base64url")
+    .slice(0, 16);
 }
 
 async function runGit(repoPath: string, args: string[]): Promise<string | null> {
@@ -209,25 +214,83 @@ export async function scanProject(entry: StoredProjectEntry): Promise<ManagedPro
   return { id: entry.id, name: entry.name, path: entry.path, exists: true, status, git, antiSlop };
 }
 
-export async function discoverReposInFolder(rootFolder: string): Promise<StoredProjectEntry[]> {
+const SKIP_DIRS = new Set([
+  "node_modules",
+  ".git",
+  "dist",
+  "build",
+  ".next",
+  ".nuxt",
+  ".venv",
+  "venv",
+  "__pycache__",
+  "target",
+  "bin",
+  "obj",
+  ".cache",
+]);
+
+const PROJECT_MARKERS = [
+  ".git",
+  "package.json",
+  "pyproject.toml",
+  "Cargo.toml",
+  "go.mod",
+  "AGENTS.md",
+  "CLAUDE.md",
+];
+
+async function isProjectRoot(dir: string): Promise<{ isRepo: boolean; hasGit: boolean }> {
+  const hasGit = await pathExists(path.join(dir, ".git"));
+  if (hasGit) return { isRepo: true, hasGit: true };
+
+  for (const marker of PROJECT_MARKERS) {
+    if (marker === ".git") continue;
+    if (await pathExists(path.join(dir, marker))) {
+      return { isRepo: true, hasGit: false };
+    }
+  }
+  return { isRepo: false, hasGit: false };
+}
+
+export async function discoverReposInFolder(
+  rootFolder: string,
+  maxDepth = 3,
+): Promise<StoredProjectEntry[]> {
   const resolved = path.resolve(rootFolder);
   const discovered: StoredProjectEntry[] = [];
+  const seen = new Set<string>();
 
-  if (await pathExists(path.join(resolved, ".git"))) {
-    discovered.push({ id: createId(resolved), name: path.basename(resolved), path: resolved });
+  async function walk(dir: string, depth: number): Promise<void> {
+    const check = await isProjectRoot(dir);
+    if (check.isRepo) {
+      const id = createId(dir);
+      if (!seen.has(id)) {
+        seen.add(id);
+        discovered.push({ id, name: path.basename(dir), path: dir });
+      }
+      // If this is a git repo (not the root scan folder itself), don't spam sub-packages
+      if (depth > 0 && check.hasGit) return;
+    }
+
+    if (depth >= maxDepth) return;
+
+    let children;
+    try {
+      children = await fs.readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    for (const child of children) {
+      if (!child.isDirectory() || child.name.startsWith(".") || SKIP_DIRS.has(child.name)) {
+        continue;
+      }
+      await walk(path.join(dir, child.name), depth + 1);
+    }
   }
 
-  const children = await fs.readdir(resolved, { withFileTypes: true });
-  for (const child of children) {
-    if (!child.isDirectory() || child.name.startsWith(".") || child.name === "node_modules") {
-      continue;
-    }
-    const candidate = path.join(resolved, child.name);
-    if (await pathExists(path.join(candidate, ".git"))) {
-      discovered.push({ id: createId(candidate), name: child.name, path: candidate });
-    }
-  }
-
+  await walk(resolved, 0);
   return discovered;
 }
 

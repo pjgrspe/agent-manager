@@ -203,15 +203,18 @@ const server = http.createServer(async (req, res) => {
       const discovered = await discoverReposInFolder(cleaned);
       const entries = await loadProjectEntries();
       let added = 0;
+      let alreadyTracked = 0;
       for (const item of discovered) {
         if (!entries.some((e) => e.id === item.id)) {
           entries.push(item);
           added++;
+        } else {
+          alreadyTracked++;
         }
       }
       await saveProjectEntries(entries);
       const scanned = await Promise.all(entries.map(scanProject));
-      sendJson(req, res, 200, { added, projects: scanned });
+      sendJson(req, res, 200, { added, alreadyTracked, totalFound: discovered.length, projects: scanned });
       return;
     }
 

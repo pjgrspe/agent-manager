@@ -291,7 +291,14 @@ export function App() {
       } else {
         const res = await scanFolder(pathInput.trim());
         setProjects(res.projects);
-        showToast(`Imported ${res.added} repository(s)`, pathInput.trim());
+        if (res.added > 0) {
+          const extra = res.alreadyTracked > 0 ? ` (${res.alreadyTracked} already tracked)` : "";
+          showToast(`Imported ${res.added} project(s)${extra}`, pathInput.trim());
+        } else if (res.alreadyTracked > 0) {
+          showToast(`All ${res.alreadyTracked} project(s) already tracked`, pathInput.trim());
+        } else {
+          showToast("No projects found in folder", "Try 'Single Repo Path' to add any folder directly");
+        }
       }
       setPathInput("");
       setShowAddModal(false);

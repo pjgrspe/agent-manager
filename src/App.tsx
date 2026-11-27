@@ -525,6 +525,15 @@ export function App() {
     setConsoleOutput((prev) => prev + "\n[stopped by user]\n");
   }
 
+  async function handleDelegateMilestone(project: ManagedProject, milestoneText: string) {
+    const prompt = [
+      `Complete this milestone following AGENTS.md / Bastion rules: ${milestoneText}`,
+      `Steps: 1) Inspect relevant files, 2) Implement root-cause fix with tests, 3) Run the repo verify command and confirm passing, 4) Update .agents/status.md to mark "- [x] ${milestoneText}" as done and add a concise Last Recap bullet.`,
+    ].join(" ");
+    showToast(`Delegated to ${activeAgentObj.label}`, milestoneText);
+    await handleRunExec(project, "agent", prompt);
+  }
+
   async function handleBrowseFolder() {
     if (!window.agentManager?.pickFolder) {
       showToast("Folder picker requires desktop app", "Paste a path or launch from Start Menu");
@@ -1247,10 +1256,27 @@ export function App() {
                 <div>
                   <div className="insp-section-title">
                     <span>What&apos;s Next (Milestones)</span>
-                    <span style={{ fontFamily: "var(--font-mono)" }}>
-                      {selectedProject.status.plan.filter((p) => p.done).length}/
-                      {selectedProject.status.plan.length}
-                    </span>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      {selectedProject.status.plan.some((p) => !p.done) && (
+                        <button
+                          className="btn btn-xs btn-primary"
+                          disabled={runningExec}
+                          onClick={() => {
+                            const nextItem = selectedProject.status.plan.find((p) => !p.done);
+                            if (nextItem) {
+                              void handleDelegateMilestone(selectedProject, nextItem.text);
+                            }
+                          }}
+                          title={`Hand the next unchecked milestone directly to ${activeAgentObj.label}`}
+                        >
+                          <Play size={10} /> Delegate Next
+                        </button>
+                      )}
+                      <span style={{ fontFamily: "var(--font-mono)" }}>
+                        {selectedProject.status.plan.filter((p) => p.done).length}/
+                        {selectedProject.status.plan.length}
+                      </span>
+                    </div>
                   </div>
                   <div className="checklist">
                     {selectedProject.status.plan.map((item, idx) => (
@@ -1273,6 +1299,16 @@ export function App() {
                           {item.done && <Check size={11} strokeWidth={3} />}
                         </motion.button>
                         <span style={{ flex: 1 }}>{item.text}</span>
+                        {!item.done && (
+                          <button
+                            className="btn btn-xs"
+                            disabled={runningExec}
+                            title={`Hand this milestone to ${activeAgentObj.label} (auto-checks off when done)`}
+                            onClick={() => void handleDelegateMilestone(selectedProject, item.text)}
+                          >
+                            <Play size={10} /> {activeAgentObj.label}
+                          </button>
+                        )}
                         <button
                           className="btn btn-ghost btn-xs"
                           onClick={() => {

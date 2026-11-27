@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
-import { discoverReposInFolder } from "./scanner.ts";
+import { detectVerifyCommand, discoverReposInFolder, installBastionIntoRepo } from "./scanner.ts";
 
 describe("discoverReposInFolder", () => {
   it("finds nested git repos up to 3 levels deep and ignores subfolders inside git repos", async () => {
@@ -20,6 +20,28 @@ describe("discoverReposInFolder", () => {
       const found = await discoverReposInFolder(tmp);
       const names = found.map((f) => f.name).sort();
       assert.deepEqual(names, ["api", "notes-app"]);
+    } finally {
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("detects verify command from package.json and installs Bastion non-destructively", async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "agent-mgr-bastion-"));
+    try {
+      await fs.writeFile(
+        path.join(tmp, "package.json"),
+        JSON.stringify({ scripts: { lint: "eslint .", test: "vitest run", build: "vite build" } }),
+        "utf8",
+      );
+      await fs.writeFile(path.join(tmp, "AGENTS.md"), "# Existing Custom Rules\n", "utf8");
+
+      assert.equal(await detectVerifyCommand(tmp), "npm run lint && npm test && npm run build");
+      const res = await installBastionIntoRepo(tmp);
+      assert.equal(res.detectedVerifyCmd, "npm run lint && npm test && npm run build");
+      const agentsContent = await fs.readFile(path.join(tmp, "AGENTS.md"), "utf8");
+      assert.equal(agentsContent, "# Existing Custom Rules\n");
+      const learnings = await fs.readFile(path.join(tmp, ".agents", "project-learnings.md"), "utf8");
+      assert.ok(learnings.includes("npm run lint && npm test && npm run build"));
     } finally {
       await fs.rm(tmp, { recursive: true, force: true });
     }

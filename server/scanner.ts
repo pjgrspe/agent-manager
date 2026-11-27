@@ -306,6 +306,126 @@ export async function autoRecapProject(entry: StoredProjectEntry): Promise<Manag
   return { ...scanned, status: savedStatus };
 }
 
+export async function detectVerifyCommand(repoPath: string): Promise<string | null> {
+  const pkgPath = path.join(repoPath, "package.json");
+  if (await pathExists(pkgPath)) {
+    try {
+      const pkg = JSON.parse(await fs.readFile(pkgPath, "utf8")) as {
+        scripts?: Record<string, string>;
+      };
+      const scripts = pkg.scripts ?? {};
+      if (scripts.verify) return "npm run verify";
+      const parts: string[] = [];
+      if (scripts.typecheck) parts.push("npm run typecheck");
+      if (scripts.lint) parts.push("npm run lint");
+      if (scripts.test && !scripts.test.includes("no test specified")) parts.push("npm test");
+      if (scripts.build) parts.push("npm run build");
+      if (parts.length > 0) return parts.join(" && ");
+    } catch {
+      // ignore invalid package.json
+    }
+  }
+
+  if (await pathExists(path.join(repoPath, "pyproject.toml"))) {
+    return "pytest -q";
+  }
+  if (await pathExists(path.join(repoPath, "Cargo.toml"))) {
+    return "cargo test";
+  }
+  if (await pathExists(path.join(repoPath, "go.mod"))) {
+    return "go test ./...";
+  }
+  return null;
+}
+
+async function copyIfAllowed(src: string, dest: string, overwrite: boolean): Promise<boolean> {
+  if (!overwrite && (await pathExists(dest))) return false;
+  await fs.mkdir(path.dirname(dest), { recursive: true });
+  await fs.copyFile(src, dest);
+  return true;
+}
+
+export async function installBastionIntoRepo(
+  repoPath: string,
+  bastionSourceRoot: string = path.resolve(process.cwd(), ".."),
+): Promise<{ installedFiles: number; detectedVerifyCmd: string | null }> {
+  const skillFiles = [
+    "SKILL.md",
+    "references/stack-guardrails.md",
+    "references/project-learnings-template.md",
+    "references/skill-audit.md",
+    "references/claude-harness.md",
+    "references/status-template.md",
+  ];
+
+  let installedFiles = 0;
+
+  // Safe mode: never overwrite existing AGENTS.md, CLAUDE.md, learnings, or status
+  for (const rootFile of ["AGENTS.md", "CLAUDE.md"]) {
+    const src = path.join(bastionSourceRoot, rootFile);
+    if (await pathExists(src)) {
+      if (await copyIfAllowed(src, path.join(repoPath, rootFile), false)) installedFiles++;
+    }
+  }
+
+  for (const rel of skillFiles) {
+    const src = path.join(bastionSourceRoot, ".agents", "skills", "bastion", rel);
+    if (!(await pathExists(src))) continue;
+    for (const targetBase of [
+      path.join(repoPath, ".agents", "skills", "bastion"),
+      path.join(repoPath, ".claude", "skills", "bastion"),
+    ]) {
+      if (await copyIfAllowed(src, path.join(targetBase, rel), true)) installedFiles++;
+    }
+  }
+
+  const cmdSrc = path.join(bastionSourceRoot, ".claude", "commands", "bastion.md");
+  if (await pathExists(cmdSrc)) {
+    if (await copyIfAllowed(cmdSrc, path.join(repoPath, ".claude", "commands", "bastion.md"), true)) {
+      installedFiles++;
+    }
+  }
+
+  const detectedVerifyCmd = await detectVerifyCommand(repoPath);
+
+  const learningsDest = path.join(repoPath, ".agents", "project-learnings.md");
+  const learningsTpl = path.join(
+    bastionSourceRoot,
+    ".agents",
+    "skills",
+    "bastion",
+    "references",
+    "project-learnings-template.md",
+  );
+  if (!(await pathExists(learningsDest)) && (await pathExists(learningsTpl))) {
+    await fs.mkdir(path.dirname(learningsDest), { recursive: true });
+    let tplContent = await fs.readFile(learningsTpl, "utf8");
+    if (detectedVerifyCmd) {
+      tplContent = tplContent.replace(
+        /\*\*Verify Cmd:\*\*\s*_\(exact quiet single command\)_/,
+        `**Verify Cmd:** \`${detectedVerifyCmd}\``,
+      );
+    }
+    await fs.writeFile(learningsDest, tplContent, "utf8");
+    installedFiles++;
+  }
+
+  const statusDest = path.join(repoPath, ".agents", "status.md");
+  const statusTpl = path.join(
+    bastionSourceRoot,
+    ".agents",
+    "skills",
+    "bastion",
+    "references",
+    "status-template.md",
+  );
+  if (!(await pathExists(statusDest)) && (await pathExists(statusTpl))) {
+    if (await copyIfAllowed(statusTpl, statusDest, false)) installedFiles++;
+  }
+
+  return { installedFiles, detectedVerifyCmd };
+}
+
 export function buildStandupSummary(projects: ManagedProject[]): StandupSummary {
   const counts = {
     total: projects.length,

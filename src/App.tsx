@@ -31,6 +31,7 @@ import {
   buildAgentCommand,
   fetchProjects,
   fetchStandup,
+  installBastion,
   previewFolder,
   removeProject,
   streamProjectExec,
@@ -456,6 +457,23 @@ export function App() {
       showToast(`Updated ${project.name}`, ".agents/status.md synced from Git");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to sync recap");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleInstallBastion(project: ManagedProject) {
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await installBastion(project.id);
+      setProjects((prev) => prev.map((p) => (p.id === res.project.id ? res.project : p)));
+      showToast(
+        `Bastion installed in ${project.name}`,
+        res.detectedVerifyCmd ? `Auto-wired verify: ${res.detectedVerifyCmd}` : "Existing rules preserved",
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to install Bastion");
     } finally {
       setSaving(false);
     }
@@ -1063,6 +1081,49 @@ export function App() {
                         </button>
                       );
                     })}
+                  </div>
+                </div>
+
+                <div>
+                  <div className="insp-section-title">
+                    <span>Bastion Guardrails</span>
+                    {selectedProject.antiSlop.hasSkill && (
+                      <span className="pill-badge pill-pass">Protected</span>
+                    )}
+                  </div>
+                  <div className="dispatch-card">
+                    {selectedProject.antiSlop.hasSkill ? (
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                        <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+                          Verify:{" "}
+                          <code style={{ fontFamily: "var(--font-mono)", color: "var(--text)" }}>
+                            {selectedProject.antiSlop.verifyCmd ?? "auto-detected"}
+                          </code>
+                        </span>
+                        <button
+                          className="btn btn-xs"
+                          disabled={saving}
+                          onClick={() => void handleInstallBastion(selectedProject)}
+                          title="Update Bastion skill files (preserves your learnings & rules)"
+                        >
+                          <RefreshCw size={11} /> Update
+                        </button>
+                      </div>
+                    ) : (
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                        <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+                          Not set up yet. Install Bastion rules, skills &amp; auto-detect verify.
+                        </span>
+                        <motion.button
+                          whileTap={{ scale: 0.96 }}
+                          className="btn btn-xs btn-primary"
+                          disabled={saving}
+                          onClick={() => void handleInstallBastion(selectedProject)}
+                        >
+                          <Shield size={12} /> Setup Bastion
+                        </motion.button>
+                      </div>
+                    )}
                   </div>
                 </div>
 

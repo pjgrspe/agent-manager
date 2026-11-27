@@ -7,7 +7,9 @@ import {
   autoRecapProject,
   buildStandupSummary,
   createId,
+  detectVerifyCommand,
   discoverReposInFolder,
+  installBastionIntoRepo,
   loadProjectEntries,
   saveProjectEntries,
   scanProject,
@@ -329,6 +331,21 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    const bastionMatch = pathname.match(/^\/api\/projects\/([^/]+)\/install-bastion$/);
+    if (req.method === "POST" && bastionMatch?.[1]) {
+      const id = decodeURIComponent(bastionMatch[1]);
+      const entries = await loadProjectEntries();
+      const target = entries.find((e) => e.id === id);
+      if (!target) {
+        sendJson(req, res, 404, { error: "Project not found" });
+        return;
+      }
+      const result = await installBastionIntoRepo(target.path);
+      const updated = await scanProject(target);
+      sendJson(req, res, 200, { ...result, project: updated });
+      return;
+    }
+
     const execMatch = pathname.match(/^\/api\/projects\/([^/]+)\/exec$/);
     if (req.method === "POST" && execMatch?.[1]) {
       const id = decodeURIComponent(execMatch[1]);
@@ -346,7 +363,19 @@ const server = http.createServer(async (req, res) => {
 
       const mode = body.mode ?? "agent";
       const scanned = await scanProject(target);
-      const spec = resolveExecCommand(mode, body.agent ?? "claude", body.prompt, scanned.antiSlop.verifyCmd);
+      const effectiveVerify =
+        scanned.antiSlop.verifyCmd ?? (mode === "verify" ? await detectVerifyCommand(target.path) : null);
+      if (mode === "verify" && !effectiveVerify) {
+        res.writeHead(200, {
+          "Content-Type": "text/plain; charset=utf-8",
+          "Access-Control-Allow-Origin": corsOrigin(req),
+        });
+        res.end(
+          "No verify/test/build script detected for this repo.\nClick 'Setup Bastion' or add a Verify Cmd in .agents/project-learnings.md.\n",
+        );
+        return;
+      }
+      const spec = resolveExecCommand(mode, body.agent ?? "claude", body.prompt, effectiveVerify);
       if (!spec.command) {
         sendJson(req, res, 400, { error: "Command is empty" });
         return;

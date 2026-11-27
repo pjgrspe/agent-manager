@@ -111,6 +111,15 @@ export async function autoRecapOne(id: string): Promise<ManagedProject> {
   return res.project;
 }
 
+export async function installBastion(
+  id: string,
+): Promise<{ installedFiles: number; detectedVerifyCmd: string | null; project: ManagedProject }> {
+  return requestJson<{ installedFiles: number; detectedVerifyCmd: string | null; project: ManagedProject }>(
+    `/projects/${encodeURIComponent(id)}/install-bastion`,
+    { method: "POST" },
+  );
+}
+
 export async function buildAgentCommand(
   id: string,
   agent: AgentKind,

@@ -95,7 +95,8 @@ export async function readGitHubPrs(repoPath: string): Promise<GitHubSyncData> {
   const now = Date.now();
   const cached = cache.get(repoPath);
   if (!cached || cached.expiresAt <= now) {
-    refreshInBackground(repoPath);
+    // Stagger background gh calls slightly so startup git scans finish first
+    setTimeout(() => refreshInBackground(repoPath), 1200);
   }
   return cached?.data ?? { available: false, openPrs: [], fetchedAt: null };
 }

@@ -139,39 +139,56 @@ async function inspectGit(repoPath: string): Promise<ProjectGitData> {
     };
   }
 
-  const [branchOut, headShaOut, headTimeOut, aheadBehindOut, statusOut, logOut] = await Promise.all([
-    runGit(repoPath, ["rev-parse", "--abbrev-ref", "HEAD"]),
-    runGit(repoPath, ["rev-parse", "--short", "HEAD"]),
-    runGit(repoPath, ["log", "-1", "--format=%cI"]),
-    runGit(repoPath, ["rev-list", "--left-right", "--count", "@{u}...HEAD"]),
-    runGit(repoPath, ["status", "--porcelain"]),
-    runGit(repoPath, ["log", "-n", "20", "--pretty=format:%h|%cs|%s"]),
+  // Only 2 git spawns per repo instead of 6 (huge speedup on Windows)
+  const [statusOut, logOut] = await Promise.all([
+    runGit(repoPath, ["status", "--porcelain=v2", "--branch"]),
+    runGit(repoPath, ["log", "-n", "20", "--pretty=format:%h|%cs|%cI|%s"]),
   ]);
 
-  let behind = 0;
+  let branch = "HEAD";
+  let headSha = "";
   let ahead = 0;
-  if (aheadBehindOut) {
-    const [bStr, aStr] = aheadBehindOut.split(/\s+/);
-    behind = Number(bStr ?? 0) || 0;
-    ahead = Number(aStr ?? 0) || 0;
+  let behind = 0;
+  let dirtyCount = 0;
+
+  if (statusOut) {
+    for (const line of statusOut.split(/\r?\n/)) {
+      if (!line) continue;
+      if (line.startsWith("# branch.head ")) {
+        branch = line.slice("# branch.head ".length).trim() || "HEAD";
+      } else if (line.startsWith("# branch.oid ")) {
+        const oid = line.slice("# branch.oid ".length).trim();
+        if (oid && oid !== "(initial)") headSha = oid.slice(0, 7);
+      } else if (line.startsWith("# branch.ab ")) {
+        const abMatch = line.match(/\+(\d+)\s+-(\d+)/);
+        if (abMatch) {
+          ahead = Number(abMatch[1] ?? 0) || 0;
+          behind = Number(abMatch[2] ?? 0) || 0;
+        }
+      } else if (!line.startsWith("# ")) {
+        dirtyCount++;
+      }
+    }
   }
 
-  const dirtyCount = statusOut ? statusOut.split(/\r?\n/).filter(Boolean).length : 0;
-  const recentCommits: GitCommitSummary[] = logOut
-    ? logOut
-        .split(/\r?\n/)
-        .filter(Boolean)
-        .map((line) => {
-          const [hash = "", date = "", ...rest] = line.split("|");
-          return { hash, date, subject: rest.join("|") };
-        })
-    : [];
+  let headTimestamp: string | null = null;
+  const recentCommits: GitCommitSummary[] = [];
+
+  if (logOut) {
+    for (const line of logOut.split(/\r?\n/)) {
+      if (!line) continue;
+      const [hash = "", date = "", iso = "", ...rest] = line.split("|");
+      if (!headTimestamp && iso) headTimestamp = iso;
+      if (!headSha && hash) headSha = hash;
+      recentCommits.push({ hash, date, subject: rest.join("|") });
+    }
+  }
 
   return {
     isGitRepo: true,
-    branch: branchOut || "HEAD",
-    headSha: headShaOut || "",
-    headTimestamp: headTimeOut || null,
+    branch,
+    headSha,
+    headTimestamp,
     dirtyCount,
     ahead,
     behind,

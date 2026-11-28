@@ -162,6 +162,7 @@ export function App() {
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<{ label: string; detail?: string } | null>(null);
   const [showClaudeMemory, setShowClaudeMemory] = useState(false);
+  const [inspectorTab, setInspectorTab] = useState<"summary" | "activity" | "settings">("summary");
 
   const searchInputRef = useRef<HTMLInputElement>(null);
 
@@ -473,11 +474,13 @@ export function App() {
           </div>
 
           <div>
-            <div className="rail-section-label">Views</div>
             <nav className="rail-nav">
               <button
                 className={`nav-item ${filter === "ControlCenter" ? "active" : ""}`}
-                onClick={() => setFilter("ControlCenter")}
+                onClick={() => {
+                  setFilter("ControlCenter");
+                  setActiveGroup(null);
+                }}
               >
                 {filter === "ControlCenter" && (
                   <motion.span
@@ -488,15 +491,42 @@ export function App() {
                 )}
                 <span className="nav-content">
                   <span className="nav-left">
-                    <LayoutDashboard size={13} color="#38bdf8" />
+                    <LayoutDashboard size={14} color="#38bdf8" />
                     Overview
                   </span>
                 </span>
               </button>
+
+              <button
+                className={`nav-item ${filter !== "ControlCenter" && filter !== "Memory" && !activeGroup ? "active" : ""}`}
+                onClick={() => {
+                  setFilter("All");
+                  setActiveGroup(null);
+                }}
+              >
+                {filter !== "ControlCenter" && filter !== "Memory" && !activeGroup && (
+                  <motion.span
+                    layoutId="nav-active-pill"
+                    className="nav-pill-bg"
+                    transition={SPRING_SNAPPY}
+                  />
+                )}
+                <span className="nav-content">
+                  <span className="nav-left">
+                    <FolderOpen size={14} color="#34d399" />
+                    Projects
+                  </span>
+                  <span className="nav-count">{stats.total}</span>
+                </span>
+              </button>
+
               <button
                 className={`nav-item ${filter === "Memory" ? "active" : ""}`}
-                onClick={() => setFilter("Memory")}
-                title="Search past updates & view daily/weekly digests (Ctrl+K)"
+                onClick={() => {
+                  setFilter("Memory");
+                  setActiveGroup(null);
+                }}
+                title="Daily & weekly briefings + search (Ctrl+K)"
               >
                 {filter === "Memory" && (
                   <motion.span
@@ -507,48 +537,11 @@ export function App() {
                 )}
                 <span className="nav-content">
                   <span className="nav-left">
-                    <Brain size={13} color="#a78bfa" />
-                    History &amp; Digests
+                    <Brain size={14} color="#a78bfa" />
+                    Briefings
                   </span>
-                  <span className="kbd-hint" style={{ fontSize: 10 }}>⌘K</span>
                 </span>
               </button>
-              {(
-                [
-                  { id: "All", label: "All Projects", count: stats.total, dot: "dot-all" },
-                  { id: "Blocked", label: "Needs Decision", count: stats.blocked, dot: "dot-blocked" },
-                  { id: "Waiting on Review", label: "Ready to Review", count: stats.review, dot: "dot-review" },
-                  { id: "Active", label: "In Progress", count: stats.active, dot: "dot-active" },
-                  { id: "Idle", label: "Idle", count: stats.idle, dot: "dot-idle" },
-                ] as Array<{ id: FilterState; label: string; count: number; dot: string }>
-              ).map((item) => {
-                const isActive = filter === item.id;
-                return (
-                  <button
-                    key={item.id}
-                    className={`nav-item ${isActive ? "active" : ""}`}
-                    onClick={() => {
-                      setFilter(item.id);
-                      setActiveGroup(null);
-                    }}
-                  >
-                    {isActive && (
-                      <motion.span
-                        layoutId="nav-active-pill"
-                        className="nav-pill-bg"
-                        transition={SPRING_SNAPPY}
-                      />
-                    )}
-                    <span className="nav-content">
-                      <span className="nav-left">
-                        <span className={`status-dot ${item.dot}`} />
-                        {item.label}
-                      </span>
-                      <span className="nav-count">{item.count}</span>
-                    </span>
-                  </button>
-                );
-              })}
             </nav>
           </div>
 
@@ -557,7 +550,7 @@ export function App() {
               <div className="rail-section-label">Groups</div>
               <nav className="rail-nav">
                 {groups.map(([groupName, count]) => {
-                  const isActive = activeGroup === groupName && filter !== "ControlCenter";
+                  const isActive = activeGroup === groupName && filter !== "ControlCenter" && filter !== "Memory";
                   return (
                     <button
                       key={groupName}
@@ -582,9 +575,6 @@ export function App() {
           )}
 
           <div className="rail-footer">
-            <motion.button whileTap={{ scale: 0.98 }} className="btn" onClick={() => void handleOpenStandup()}>
-              <ClipboardList size={14} /> Daily Brief
-            </motion.button>
             <motion.button
               whileTap={{ scale: 0.98 }}
               className="btn btn-primary"
@@ -664,31 +654,31 @@ export function App() {
               <MemoryBrain onSelectProject={(id) => setSelectedId(id)} />
             ) : (
               <>
-            {/* Today at a Glance Hero */}
-            <motion.div
-              className="hero-brief"
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={SPRING_SMOOTH}
-            >
-              <div>
-                <div className="hero-eyebrow">
-                  <Sparkles size={11} style={{ verticalAlign: "-1px", marginRight: 5 }} />
-                  Today at a Glance
-                </div>
-                <p className="hero-headline">{heroHeadline}</p>
-              </div>
-              <div className="hero-actions">
-                {stats.blocked > 0 && filter !== "Blocked" && (
-                  <button className="btn btn-danger btn-xs" onClick={() => setFilter("Blocked")}>
-                    <AlertTriangle size={12} /> View Blockers ({stats.blocked})
+            {/* Inline Status Filter Bar */}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {(
+                  [
+                    { id: "All", label: `All (${stats.total})` },
+                    { id: "Blocked", label: `Needs Decision (${stats.blocked})` },
+                    { id: "Waiting on Review", label: `In Review (${stats.review})` },
+                    { id: "Active", label: `In Progress (${stats.active})` },
+                    { id: "Idle", label: `Idle (${stats.idle})` },
+                  ] as Array<{ id: FilterState; label: string }>
+                ).map((pill) => (
+                  <button
+                    key={pill.id}
+                    className={`btn btn-xs ${filter === pill.id ? "btn-primary" : ""}`}
+                    onClick={() => setFilter(pill.id)}
+                  >
+                    {pill.label}
                   </button>
-                )}
-                <button className="btn btn-xs" onClick={() => void handleOpenStandup()}>
-                  <ClipboardList size={12} /> Standup Summary
-                </button>
+                ))}
               </div>
-            </motion.div>
+              <button className="btn btn-xs" onClick={() => void handleOpenStandup()}>
+                <ClipboardList size={12} /> Quick Standup
+              </button>
+            </div>
 
             {loading && projects.length === 0 ? (
               <div className="empty-state">Scanning local repositories...</div>
@@ -1071,494 +1061,488 @@ export function App() {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.2 }}
               >
-                <div>
-                  <div className="insp-section-title">
-                    <span>Current Summary</span>
-                  </div>
-                  <div className="dispatch-card">
-                    <div style={{ fontSize: 12.5, color: "var(--text)" }}>
-                      {selectedProject.truth.reason}
-                    </div>
-                  </div>
+                <div className="glass-segmented cols-3">
+                  {(
+                    [
+                      { id: "summary", label: "Summary" },
+                      { id: "activity", label: "Activity" },
+                      { id: "settings", label: "Settings" },
+                    ] as const
+                  ).map((t) => (
+                    <button
+                      key={t.id}
+                      className={`seg-option ${inspectorTab === t.id ? "active" : ""}`}
+                      onClick={() => setInspectorTab(t.id)}
+                    >
+                      {inspectorTab === t.id && (
+                        <motion.span layoutId="insp-tab-pill" className="seg-pill-bg" transition={SPRING_SNAPPY} />
+                      )}
+                      <span className="seg-label">{t.label}</span>
+                    </button>
+                  ))}
                 </div>
 
-                {selectedProject.github && selectedProject.github.openPrs.length > 0 && (
-                  <div>
-                    <div className="insp-section-title">
-                      <span>Open GitHub Pull Requests</span>
-                      <span className="nav-count">{selectedProject.github.openPrs.length}</span>
+                {inspectorTab === "summary" && (
+                  <>
+                    <div>
+                      <div className="insp-section-title">Status</div>
+                      <div className="dispatch-card" style={{ gap: 10 }}>
+                        <div style={{ fontSize: 12.5, color: "var(--text)" }}>
+                          {selectedProject.truth.reason}
+                        </div>
+                        <div className="glass-segmented cols-4">
+                          {(["Active", "Waiting on Review", "Blocked", "Idle"] as ProjectState[]).map(
+                            (st) => {
+                              const active = selectedProject.status.state === st;
+                              return (
+                                <button
+                                  key={st}
+                                  disabled={saving}
+                                  className={`seg-option ${active ? "active" : ""}`}
+                                  onClick={() => void saveStatusUpdate(selectedProject, { state: st })}
+                                >
+                                  {active && (
+                                    <motion.span
+                                      layoutId="insp-state-pill"
+                                      className="seg-pill-bg"
+                                      transition={SPRING_SNAPPY}
+                                    />
+                                  )}
+                                  <span className="seg-label">
+                                    {st === "Waiting on Review" ? "Review" : st}
+                                  </span>
+                                </button>
+                              );
+                            },
+                          )}
+                        </div>
+                      </div>
                     </div>
-                    <div className="checklist">
-                      {selectedProject.github.openPrs.map((pr) => (
-                        <a
-                          key={pr.number}
-                          href={pr.url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="check-row"
-                          style={{ textDecoration: "none", color: "inherit" }}
-                        >
-                          <GitPullRequest size={13} color={pr.ciStatus === "Fail" ? "#fb7185" : "#fbbf24"} />
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ fontWeight: 550 }}>
-                              #{pr.number} {pr.title}
-                            </div>
-                            <div style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
-                              {pr.branch} {pr.isDraft ? "· Draft" : ""}
-                            </div>
-                          </div>
-                          {pr.ciStatus !== "None" && (
-                            <span
-                              className={`pill-badge ${
-                                pr.ciStatus === "Pass"
-                                  ? "pill-pass"
-                                  : pr.ciStatus === "Fail"
-                                    ? "pill-blocked"
-                                    : "pill-review"
-                              }`}
+
+                    <div>
+                      <div className="insp-section-title">Needs Your Decision</div>
+                      <div className="checklist">
+                        {selectedProject.status.blockers.map((b, idx) => (
+                          <div
+                            key={idx}
+                            className="row-blocker"
+                            style={{ width: "100%", justifyContent: "space-between" }}
+                          >
+                            <span style={{ flex: 1 }}>{b}</span>
+                            <button
+                              className="btn btn-xs"
+                              onClick={() =>
+                                void saveStatusUpdate(selectedProject, {
+                                  blockers: selectedProject.status.blockers.filter((_, i) => i !== idx),
+                                })
+                              }
                             >
-                              CI {pr.ciStatus}
-                            </span>
-                          )}
-                        </a>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {selectedProject.github && selectedProject.github.milestones.length > 0 && (
-                  <div>
-                    <div className="insp-section-title">
-                      <span>GitHub Goals &amp; Milestones</span>
-                      <span className="nav-count">{selectedProject.github.milestones.length}</span>
-                    </div>
-                    <div className="checklist">
-                      {selectedProject.github.milestones.map((m) => {
-                        const total = m.openIssues + m.closedIssues;
-                        const pct = total > 0 ? Math.round((m.closedIssues / total) * 100) : 0;
-                        return (
-                          <a
-                            key={m.title}
-                            href={m.url}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="check-row"
-                            style={{ textDecoration: "none", color: "inherit", flexDirection: "column", alignItems: "stretch", gap: 6 }}
-                          >
-                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-                              <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontWeight: 550 }}>
-                                <Target size={13} color="#a78bfa" /> {m.title}
-                              </span>
-                              <span className="mono-tag">{m.closedIssues}/{total} ({pct}%)</span>
-                            </div>
-                            <div style={{ height: 4, borderRadius: 99, background: "rgba(255,255,255,0.08)", overflow: "hidden" }}>
-                              <div style={{ width: `${pct}%`, height: "100%", background: "#a78bfa", borderRadius: 99 }} />
-                            </div>
-                          </a>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-
-                {selectedProject.github && selectedProject.github.openIssues.length > 0 && (
-                  <div>
-                    <div className="insp-section-title">
-                      <span>Open GitHub Issues</span>
-                      <span className="nav-count">{selectedProject.github.openIssues.length}</span>
-                    </div>
-                    <div className="checklist">
-                      {selectedProject.github.openIssues.slice(0, 6).map((issue) => (
-                        <a
-                          key={issue.number}
-                          href={issue.url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="check-row"
-                          style={{ textDecoration: "none", color: "inherit" }}
-                        >
-                          <CircleDot size={13} color="#38bdf8" style={{ flexShrink: 0 }} />
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ fontWeight: 500 }}>
-                              #{issue.number} {issue.title}
-                            </div>
-                            {issue.labels.length > 0 && (
-                              <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 3 }}>
-                                {issue.labels.slice(0, 3).map((lbl) => (
-                                  <span key={lbl} className="mono-tag">{lbl}</span>
-                                ))}
-                              </div>
-                            )}
+                              Resolve
+                            </button>
                           </div>
-                        </a>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {selectedProject.github && selectedProject.github.mergedPrs.length > 0 && (
-                  <div>
-                    <div className="insp-section-title">
-                      <span>Recently Shipped (Merged PRs)</span>
-                      <span className="nav-count">{selectedProject.github.mergedPrs.length}</span>
-                    </div>
-                    <div className="checklist">
-                      {selectedProject.github.mergedPrs.slice(0, 5).map((pr) => (
-                        <a
-                          key={pr.number}
-                          href={pr.url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="check-row"
-                          style={{ textDecoration: "none", color: "inherit" }}
-                        >
-                          <GitMerge size={13} color="#34d399" style={{ flexShrink: 0 }} />
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ fontWeight: 500 }}>
-                              #{pr.number} {pr.title}
-                            </div>
-                            <div style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
-                              Merged {pr.mergedAt.slice(0, 10)}
-                            </div>
-                          </div>
-                        </a>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {selectedProject.agentSessions.length > 0 && (
-                  <div>
-                    <div className="insp-section-title">
-                      <span>Passive Agent Sessions</span>
-                      <span className="nav-count">{selectedProject.agentSessions.length}</span>
-                    </div>
-                    <div className="checklist">
-                      {selectedProject.agentSessions.map((sess) => (
-                        <div
-                          key={sess.agent}
-                          className="dispatch-card"
-                          style={{ padding: 10, gap: 6 }}
-                        >
-                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-                            <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontWeight: 600, fontSize: 12.5 }}>
-                              <Bot size={13} color="#a78bfa" /> {sess.agent}
-                            </span>
-                            {sess.lastActiveAt && (
-                              <span style={{ fontSize: 10.5, fontFamily: "var(--font-mono)", color: "var(--text-muted)" }}>
-                                {new Date(sess.lastActiveAt).toLocaleString()}
-                              </span>
-                            )}
-                          </div>
-                          {sess.summary && (
-                            <div style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>
-                              {sess.summary}
-                            </div>
-                          )}
-                          {sess.tasks.length > 0 && (
-                            <div style={{ display: "flex", flexDirection: "column", gap: 3, marginTop: 2 }}>
-                              {sess.tasks.slice(0, 5).map((t, i) => (
-                                <div key={i} style={{ fontSize: 11.5, color: t.done ? "var(--text-muted)" : "var(--text)", textDecoration: t.done ? "line-through" : "none" }}>
-                                  {t.done ? "✓ " : "○ "}
-                                  {t.text}
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                <div>
-                  <div className="insp-section-title">Display Name &amp; Group</div>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                    <input
-                      className="text-input"
-                      placeholder="Display name (does not rename folder)"
-                      value={inspectorNameDraft}
-                      onChange={(e) => setInspectorNameDraft(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          void handleSaveMeta(selectedProject, inspectorNameDraft, inspectorGroupDraft);
-                        }
-                      }}
-                    />
-                    <div className="input-inline">
-                      <input
-                        className="text-input"
-                        placeholder="Group (e.g., Work, Side Projects...)"
-                        value={inspectorGroupDraft}
-                        onChange={(e) => setInspectorGroupDraft(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") {
-                            void handleSaveMeta(selectedProject, inspectorNameDraft, inspectorGroupDraft);
-                          }
-                        }}
-                      />
-                      <button
-                        className="btn btn-xs"
-                        onClick={() =>
-                          void handleSaveMeta(selectedProject, inspectorNameDraft, inspectorGroupDraft)
-                        }
-                      >
-                        Save
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                <div>
-                  <div className="insp-section-title">Project Status</div>
-                  <div className="glass-segmented cols-4">
-                    {(["Active", "Waiting on Review", "Blocked", "Idle"] as ProjectState[]).map(
-                      (st) => {
-                        const active = selectedProject.status.state === st;
-                        return (
+                        ))}
+                        <div className="input-inline" style={{ marginTop: 4 }}>
+                          <input
+                            className="text-input"
+                            placeholder="Add an open decision or blocker..."
+                            value={newBlockerText}
+                            onChange={(e) => setNewBlockerText(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" && newBlockerText.trim()) {
+                                void saveStatusUpdate(selectedProject, {
+                                  blockers: [...selectedProject.status.blockers, newBlockerText.trim()],
+                                });
+                                setNewBlockerText("");
+                              }
+                            }}
+                          />
                           <button
-                            key={st}
-                            disabled={saving}
-                            className={`seg-option ${active ? "active" : ""}`}
-                            onClick={() => void saveStatusUpdate(selectedProject, { state: st })}
+                            className="btn btn-xs"
+                            onClick={() => {
+                              if (!newBlockerText.trim()) return;
+                              void saveStatusUpdate(selectedProject, {
+                                blockers: [...selectedProject.status.blockers, newBlockerText.trim()],
+                              });
+                              setNewBlockerText("");
+                            }}
                           >
-                            {active && (
-                              <motion.span
-                                layoutId="insp-state-pill"
-                                className="seg-pill-bg"
-                                transition={SPRING_SNAPPY}
-                              />
-                            )}
-                            <span className="seg-label">
-                              {st === "Waiting on Review" ? "Review" : st}
-                            </span>
+                            <Plus size={12} />
                           </button>
-                        );
-                      },
-                    )}
-                  </div>
-                </div>
-
-                {selectedProject.claudeSync?.memoryIndex && (
-                  <div>
-                    <div className="insp-section-title">
-                      <span>Saved Agent Notes</span>
-                      <button
-                        className="btn btn-ghost btn-xs"
-                        onClick={() => setShowClaudeMemory((v) => !v)}
-                      >
-                        {showClaudeMemory ? "Hide" : "Show"}
-                      </button>
-                    </div>
-                    {showClaudeMemory && (
-                      <div className="console-box" style={{ maxHeight: 210 }}>
-                        {selectedProject.claudeSync.memoryIndex}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                <div>
-                  <div className="insp-section-title">
-                    <span>What&apos;s Next (Goals)</span>
-                    <span style={{ fontFamily: "var(--font-mono)" }}>
-                      {selectedProject.status.plan.filter((p) => p.done).length}/
-                      {selectedProject.status.plan.length}
-                    </span>
-                  </div>
-                  <div className="checklist">
-                    {selectedProject.status.plan.map((item, idx) => (
-                      <motion.div
-                        layout
-                        key={`${idx}-${item.text}`}
-                        className={`check-row ${item.done ? "done" : ""}`}
-                      >
-                        <motion.button
-                          whileTap={{ scale: 0.85 }}
-                          className={`check-toggle ${item.done ? "checked" : ""}`}
-                          onClick={() => {
-                            const nextPlan = selectedProject.status.plan.map((p, i) =>
-                              i === idx ? { ...p, done: !p.done } : p,
-                            );
-                            void saveStatusUpdate(selectedProject, { plan: nextPlan });
-                          }}
-                          aria-label={item.done ? "Mark incomplete" : "Mark complete"}
-                        >
-                          {item.done && <Check size={11} strokeWidth={3} />}
-                        </motion.button>
-                        <span style={{ flex: 1 }}>{item.text}</span>
-                        <button
-                          className="btn btn-ghost btn-xs"
-                          onClick={() => {
-                            const nextPlan = selectedProject.status.plan.filter((_, i) => i !== idx);
-                            void saveStatusUpdate(selectedProject, { plan: nextPlan });
-                          }}
-                        >
-                          <X size={12} />
-                        </button>
-                      </motion.div>
-                    ))}
-                    <div className="input-inline" style={{ marginTop: 4 }}>
-                      <input
-                        className="text-input"
-                        placeholder="Add next milestone..."
-                        value={newPlanText}
-                        onChange={(e) => setNewPlanText(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" && newPlanText.trim()) {
-                            void saveStatusUpdate(selectedProject, {
-                              plan: [...selectedProject.status.plan, { text: newPlanText.trim(), done: false }],
-                            });
-                            setNewPlanText("");
-                          }
-                        }}
-                      />
-                      <button
-                        className="btn btn-xs"
-                        onClick={() => {
-                          if (!newPlanText.trim()) return;
-                          void saveStatusUpdate(selectedProject, {
-                            plan: [...selectedProject.status.plan, { text: newPlanText.trim(), done: false }],
-                          });
-                          setNewPlanText("");
-                        }}
-                      >
-                        <Plus size={12} />
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                <div>
-                  <div className="insp-section-title">
-                    <span>What Happened Recently</span>
-                  </div>
-                  <div className="checklist">
-                    {selectedProject.status.recap.map((r, idx) => (
-                      <div key={idx} className="check-row">
-                        <CheckCircle2 size={13} color="#34d399" style={{ flexShrink: 0 }} />
-                        <span style={{ flex: 1 }}>{r}</span>
-                        <button
-                          className="btn btn-ghost btn-xs"
-                          onClick={() =>
-                            void saveStatusUpdate(selectedProject, {
-                              recap: selectedProject.status.recap.filter((_, i) => i !== idx),
-                            })
-                          }
-                        >
-                          <X size={12} />
-                        </button>
-                      </div>
-                    ))}
-                    <div className="input-inline" style={{ marginTop: 4 }}>
-                      <input
-                        className="text-input"
-                        placeholder="Add a recap note..."
-                        value={newRecapText}
-                        onChange={(e) => setNewRecapText(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" && newRecapText.trim()) {
-                            void saveStatusUpdate(selectedProject, {
-                              recap: [newRecapText.trim(), ...selectedProject.status.recap],
-                            });
-                            setNewRecapText("");
-                          }
-                        }}
-                      />
-                      <button
-                        className="btn btn-xs"
-                        onClick={() => {
-                          if (!newRecapText.trim()) return;
-                          void saveStatusUpdate(selectedProject, {
-                            recap: [newRecapText.trim(), ...selectedProject.status.recap],
-                          });
-                          setNewRecapText("");
-                        }}
-                      >
-                        <Plus size={12} />
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                <div>
-                  <div className="insp-section-title">Needs Your Decision / Blockers</div>
-                  <div className="checklist">
-                    {selectedProject.status.blockers.map((b, idx) => (
-                      <div
-                        key={idx}
-                        className="row-blocker"
-                        style={{ width: "100%", justifyContent: "space-between" }}
-                      >
-                        <span style={{ flex: 1 }}>{b}</span>
-                        <button
-                          className="btn btn-xs"
-                          onClick={() =>
-                            void saveStatusUpdate(selectedProject, {
-                              blockers: selectedProject.status.blockers.filter((_, i) => i !== idx),
-                            })
-                          }
-                        >
-                          Resolve
-                        </button>
-                      </div>
-                    ))}
-                    <div className="input-inline" style={{ marginTop: 4 }}>
-                      <input
-                        className="text-input"
-                        placeholder="Record a blocker or open decision..."
-                        value={newBlockerText}
-                        onChange={(e) => setNewBlockerText(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" && newBlockerText.trim()) {
-                            void saveStatusUpdate(selectedProject, {
-                              blockers: [...selectedProject.status.blockers, newBlockerText.trim()],
-                            });
-                            setNewBlockerText("");
-                          }
-                        }}
-                      />
-                      <button
-                        className="btn btn-xs"
-                        onClick={() => {
-                          if (!newBlockerText.trim()) return;
-                          void saveStatusUpdate(selectedProject, {
-                            blockers: [...selectedProject.status.blockers, newBlockerText.trim()],
-                          });
-                          setNewBlockerText("");
-                        }}
-                      >
-                        <Plus size={12} />
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                {selectedProject.git.recentCommits.length > 0 && (
-                  <div>
-                    <div className="insp-section-title">Recent Git Commits</div>
-                    <div className="commit-list">
-                      {selectedProject.git.recentCommits.map((c) => (
-                        <div key={c.hash} className="commit-row">
-                          <span className="commit-hash">{c.hash}</span>
-                          <span className="commit-date">{c.date}</span>
-                          <span className="commit-msg" title={c.subject}>
-                            {c.subject}
-                          </span>
                         </div>
-                      ))}
+                      </div>
                     </div>
-                  </div>
+
+                    {selectedProject.github && selectedProject.github.openPrs.length > 0 && (
+                      <div>
+                        <div className="insp-section-title">
+                          <span>Waiting for Review</span>
+                          <span className="nav-count">{selectedProject.github.openPrs.length}</span>
+                        </div>
+                        <div className="checklist">
+                          {selectedProject.github.openPrs.map((pr) => (
+                            <a
+                              key={pr.number}
+                              href={pr.url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="check-row"
+                              style={{ textDecoration: "none", color: "inherit" }}
+                            >
+                              <GitPullRequest size={13} color={pr.ciStatus === "Fail" ? "#fb7185" : "#fbbf24"} />
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ fontWeight: 550 }}>
+                                  #{pr.number} {pr.title}
+                                </div>
+                              </div>
+                              <ExternalLink size={12} color="var(--text-muted)" />
+                            </a>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {selectedProject.github && selectedProject.github.milestones.length > 0 && (
+                      <div>
+                        <div className="insp-section-title">
+                          <span>GitHub Milestones</span>
+                          <span className="nav-count">{selectedProject.github.milestones.length}</span>
+                        </div>
+                        <div className="checklist">
+                          {selectedProject.github.milestones.map((m) => {
+                            const total = m.openIssues + m.closedIssues;
+                            const pct = total > 0 ? Math.round((m.closedIssues / total) * 100) : 0;
+                            return (
+                              <a
+                                key={m.title}
+                                href={m.url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="check-row"
+                                style={{ textDecoration: "none", color: "inherit", flexDirection: "column", alignItems: "stretch", gap: 6 }}
+                              >
+                                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontWeight: 550 }}>
+                                    <Target size={13} color="#a78bfa" /> {m.title}
+                                  </span>
+                                  <span className="mono-tag">{m.closedIssues}/{total} ({pct}%)</span>
+                                </div>
+                                <div style={{ height: 4, borderRadius: 99, background: "rgba(255,255,255,0.08)", overflow: "hidden" }}>
+                                  <div style={{ width: `${pct}%`, height: "100%", background: "#a78bfa", borderRadius: 99 }} />
+                                </div>
+                              </a>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    <div>
+                      <div className="insp-section-title">
+                        <span>Planned Goals</span>
+                        <span style={{ fontFamily: "var(--font-mono)" }}>
+                          {selectedProject.status.plan.filter((p) => p.done).length}/
+                          {selectedProject.status.plan.length}
+                        </span>
+                      </div>
+                      <div className="checklist">
+                        {selectedProject.status.plan.map((item, idx) => (
+                          <motion.div
+                            layout
+                            key={`${idx}-${item.text}`}
+                            className={`check-row ${item.done ? "done" : ""}`}
+                          >
+                            <motion.button
+                              whileTap={{ scale: 0.85 }}
+                              className={`check-toggle ${item.done ? "checked" : ""}`}
+                              onClick={() => {
+                                const nextPlan = selectedProject.status.plan.map((p, i) =>
+                                  i === idx ? { ...p, done: !p.done } : p,
+                                );
+                                void saveStatusUpdate(selectedProject, { plan: nextPlan });
+                              }}
+                              aria-label={item.done ? "Mark incomplete" : "Mark complete"}
+                            >
+                              {item.done && <Check size={11} strokeWidth={3} />}
+                            </motion.button>
+                            <span style={{ flex: 1 }}>{item.text}</span>
+                            <button
+                              className="btn btn-ghost btn-xs"
+                              onClick={() => {
+                                const nextPlan = selectedProject.status.plan.filter((_, i) => i !== idx);
+                                void saveStatusUpdate(selectedProject, { plan: nextPlan });
+                              }}
+                            >
+                              <X size={12} />
+                            </button>
+                          </motion.div>
+                        ))}
+                        <div className="input-inline" style={{ marginTop: 4 }}>
+                          <input
+                            className="text-input"
+                            placeholder="Add a goal..."
+                            value={newPlanText}
+                            onChange={(e) => setNewPlanText(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" && newPlanText.trim()) {
+                                void saveStatusUpdate(selectedProject, {
+                                  plan: [...selectedProject.status.plan, { text: newPlanText.trim(), done: false }],
+                                });
+                                setNewPlanText("");
+                              }
+                            }}
+                          />
+                          <button
+                            className="btn btn-xs"
+                            onClick={() => {
+                              if (!newPlanText.trim()) return;
+                              void saveStatusUpdate(selectedProject, {
+                                plan: [...selectedProject.status.plan, { text: newPlanText.trim(), done: false }],
+                              });
+                              setNewPlanText("");
+                            }}
+                          >
+                            <Plus size={12} />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </>
                 )}
 
-                <div style={{ paddingTop: 12, borderTop: "1px solid var(--border)" }}>
-                  <button
-                    className="btn btn-xs btn-danger"
-                    onClick={() => void handleRemove(selectedProject.id)}
-                  >
-                    <Trash2 size={12} /> Untrack Repository
-                  </button>
-                </div>
+                {inspectorTab === "activity" && (
+                  <>
+                    {selectedProject.github && selectedProject.github.mergedPrs.length > 0 && (
+                      <div>
+                        <div className="insp-section-title">
+                          <span>Shipped Recently</span>
+                          <span className="nav-count">{selectedProject.github.mergedPrs.length}</span>
+                        </div>
+                        <div className="checklist">
+                          {selectedProject.github.mergedPrs.slice(0, 6).map((pr) => (
+                            <a
+                              key={pr.number}
+                              href={pr.url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="check-row"
+                              style={{ textDecoration: "none", color: "inherit" }}
+                            >
+                              <GitMerge size={13} color="#34d399" style={{ flexShrink: 0 }} />
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ fontWeight: 500 }}>#{pr.number} {pr.title}</div>
+                                <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                                  {pr.mergedAt.slice(0, 10)}
+                                </div>
+                              </div>
+                            </a>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {selectedProject.agentSessions.length > 0 && (
+                      <div>
+                        <div className="insp-section-title">
+                          <span>Agent Activity</span>
+                          <span className="nav-count">{selectedProject.agentSessions.length}</span>
+                        </div>
+                        <div className="checklist">
+                          {selectedProject.agentSessions.map((sess) => (
+                            <div key={sess.agent} className="dispatch-card" style={{ padding: 10, gap: 6 }}>
+                              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                                <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontWeight: 600, fontSize: 12.5 }}>
+                                  <Bot size={13} color="#a78bfa" /> {sess.agent}
+                                </span>
+                                {sess.lastActiveAt && (
+                                  <span style={{ fontSize: 10.5, color: "var(--text-muted)" }}>
+                                    {new Date(sess.lastActiveAt).toLocaleDateString()}
+                                  </span>
+                                )}
+                              </div>
+                              {sess.summary && (
+                                <div style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>
+                                  {sess.summary}
+                                </div>
+                              )}
+                              {sess.tasks.length > 0 && (
+                                <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                                  {sess.tasks.slice(0, 5).map((t, i) => (
+                                    <div key={i} style={{ fontSize: 11.5, color: t.done ? "var(--text-muted)" : "var(--text)", textDecoration: t.done ? "line-through" : "none" }}>
+                                      {t.done ? "✓ " : "○ "}
+                                      {t.text}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {selectedProject.claudeSync?.memoryIndex && (
+                      <div>
+                        <div className="insp-section-title">
+                          <span>Saved Agent Notes</span>
+                          <button
+                            className="btn btn-ghost btn-xs"
+                            onClick={() => setShowClaudeMemory((v) => !v)}
+                          >
+                            {showClaudeMemory ? "Hide" : "Show"}
+                          </button>
+                        </div>
+                        {showClaudeMemory && (
+                          <div className="console-box" style={{ maxHeight: 210 }}>
+                            {selectedProject.claudeSync.memoryIndex}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {selectedProject.github && selectedProject.github.openIssues.length > 0 && (
+                      <div>
+                        <div className="insp-section-title">
+                          <span>Open Issues</span>
+                          <span className="nav-count">{selectedProject.github.openIssues.length}</span>
+                        </div>
+                        <div className="checklist">
+                          {selectedProject.github.openIssues.slice(0, 6).map((issue) => (
+                            <a
+                              key={issue.number}
+                              href={issue.url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="check-row"
+                              style={{ textDecoration: "none", color: "inherit" }}
+                            >
+                              <CircleDot size={13} color="#38bdf8" style={{ flexShrink: 0 }} />
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ fontWeight: 500 }}>#{issue.number} {issue.title}</div>
+                              </div>
+                            </a>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {selectedProject.git.recentCommits.length > 0 && (
+                      <div>
+                        <div className="insp-section-title">Recent Updates</div>
+                        <div className="commit-list">
+                          {selectedProject.git.recentCommits.slice(0, 8).map((c) => (
+                            <div key={c.hash} className="commit-row">
+                              <span className="commit-date">{c.date}</span>
+                              <span className="commit-msg" title={c.subject}>
+                                {c.subject}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    <div>
+                      <div className="insp-section-title">Notes</div>
+                      <div className="checklist">
+                        {selectedProject.status.recap.map((r, idx) => (
+                          <div key={idx} className="check-row">
+                            <CheckCircle2 size={13} color="#34d399" style={{ flexShrink: 0 }} />
+                            <span style={{ flex: 1 }}>{r}</span>
+                            <button
+                              className="btn btn-ghost btn-xs"
+                              onClick={() =>
+                                void saveStatusUpdate(selectedProject, {
+                                  recap: selectedProject.status.recap.filter((_, i) => i !== idx),
+                                })
+                              }
+                            >
+                              <X size={12} />
+                            </button>
+                          </div>
+                        ))}
+                        <div className="input-inline" style={{ marginTop: 4 }}>
+                          <input
+                            className="text-input"
+                            placeholder="Add a note..."
+                            value={newRecapText}
+                            onChange={(e) => setNewRecapText(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" && newRecapText.trim()) {
+                                void saveStatusUpdate(selectedProject, {
+                                  recap: [newRecapText.trim(), ...selectedProject.status.recap],
+                                });
+                                setNewRecapText("");
+                              }
+                            }}
+                          />
+                          <button
+                            className="btn btn-xs"
+                            onClick={() => {
+                              if (!newRecapText.trim()) return;
+                              void saveStatusUpdate(selectedProject, {
+                                recap: [newRecapText.trim(), ...selectedProject.status.recap],
+                              });
+                              setNewRecapText("");
+                            }}
+                          >
+                            <Plus size={12} />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {inspectorTab === "settings" && (
+                  <>
+                    <div>
+                      <div className="insp-section-title">Project Name &amp; Group</div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                        <input
+                          className="text-input"
+                          placeholder="Display name"
+                          value={inspectorNameDraft}
+                          onChange={(e) => setInspectorNameDraft(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              void handleSaveMeta(selectedProject, inspectorNameDraft, inspectorGroupDraft);
+                            }
+                          }}
+                        />
+                        <div className="input-inline">
+                          <input
+                            className="text-input"
+                            placeholder="Group (e.g., Work, Client...)"
+                            value={inspectorGroupDraft}
+                            onChange={(e) => setInspectorGroupDraft(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                void handleSaveMeta(selectedProject, inspectorNameDraft, inspectorGroupDraft);
+                              }
+                            }}
+                          />
+                          <button
+                            className="btn btn-xs btn-primary"
+                            onClick={() =>
+                              void handleSaveMeta(selectedProject, inspectorNameDraft, inspectorGroupDraft)
+                            }
+                          >
+                            Save
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div style={{ paddingTop: 12, borderTop: "1px solid var(--border)" }}>
+                      <button
+                        className="btn btn-xs btn-danger"
+                        onClick={() => void handleRemove(selectedProject.id)}
+                      >
+                        <Trash2 size={12} /> Remove Project
+                      </button>
+                    </div>
+                  </>
+                )}
               </motion.div>
             </motion.aside>
           )}

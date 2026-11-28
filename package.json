@@ -11,7 +11,7 @@
     "start": "electron .",
     "desktop": "concurrently -k \"npm:dev:server\" \"npm:dev:web\" \"wait-on http-get://localhost:5173 http-get://127.0.0.1:4311/api/health && electron .\"",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test src/core/statusParser.test.ts server/scanner.test.ts server/claudeReader.test.ts",
+    "test": "node --experimental-strip-types --test src/core/statusParser.test.ts server/scanner.test.ts server/claudeReader.test.ts server/memoryIndex.test.ts",
     "build": "vite build",
     "verify": "npm run typecheck && npm run test && npm run build"
   },

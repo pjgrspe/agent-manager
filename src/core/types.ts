@@ -142,6 +142,50 @@ export interface StandupSummary {
   };
 }
 
+export type MemorySourceKind =
+  | "commit"
+  | "pr"
+  | "merged_pr"
+  | "issue"
+  | "milestone"
+  | "agent_session"
+  | "claude_memory"
+  | "blocker"
+  | "plan";
+
+export interface MemorySearchHit {
+  docKey: string;
+  projectId: string;
+  projectName: string;
+  source: MemorySourceKind;
+  title: string;
+  snippet: string;
+  url: string | null;
+  occurredAt: string | null;
+}
+
+export interface MemoryIndexStats {
+  totalDocs: number;
+  bySource: Record<string, number>;
+  lastIndexedAt: string | null;
+}
+
+export interface PmDigestEntry {
+  id?: number;
+  period: "daily" | "weekly";
+  createdAt: string;
+  headline: string;
+  stats: {
+    commitsCount: number;
+    mergedPrsCount: number;
+    openPrsCount: number;
+    openIssuesCount: number;
+    blockedCount: number;
+    activeAgentsCount: number;
+  };
+  markdown: string;
+}
+
 declare global {
   interface Window {
     agentManager?: {

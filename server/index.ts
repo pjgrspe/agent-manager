@@ -4,6 +4,7 @@ import http from "node:http";
 import path from "node:path";
 import type { AgentKind, ProjectStatusData } from "../src/core/types.ts";
 import { parseGitHubSlugFromUrl } from "./githubReader.ts";
+import { buildPmDigest, getMemoryStore } from "./memoryIndex.ts";
 import {
   autoRecapProject,
   buildStandupSummary,
@@ -169,7 +170,51 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && pathname === "/api/projects") {
       const fresh = url.searchParams.get("fresh") === "1";
       const scanned = await getProjectsFast(fresh);
+      try {
+        const store = getMemoryStore();
+        store.syncProjects(scanned);
+        store.recordScheduledDigestsIfDue(scanned);
+      } catch {
+        // Non-fatal: keep project listing fast even if SQLite is locked
+      }
       sendJson(req, res, 200, { projects: scanned });
+      return;
+    }
+
+    if (req.method === "GET" && pathname === "/api/memory/search") {
+      const q = url.searchParams.get("q") ?? "";
+      const source = url.searchParams.get("source") ?? undefined;
+      const projectId = url.searchParams.get("projectId") ?? undefined;
+      const store = getMemoryStore();
+      const results = store.search(q, { source: source || undefined, projectId: projectId || undefined, limit: 40 });
+      const stats = store.getStats();
+      sendJson(req, res, 200, { results, stats });
+      return;
+    }
+
+    if (req.method === "GET" && pathname === "/api/digests") {
+      const store = getMemoryStore();
+      const scanned = await getProjectsFast(false);
+      store.syncProjects(scanned);
+      store.recordScheduledDigestsIfDue(scanned);
+      const history = store.listDigests(16);
+      sendJson(req, res, 200, {
+        latestDaily: history.find((d) => d.period === "daily") ?? buildPmDigest(scanned, "daily"),
+        latestWeekly: history.find((d) => d.period === "weekly") ?? buildPmDigest(scanned, "weekly"),
+        history,
+      });
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/digests/generate") {
+      const body = await readJsonBody<{ period?: "daily" | "weekly" }>(req);
+      const period = body.period === "weekly" ? "weekly" : "daily";
+      const scanned = await getProjectsFast(false);
+      const store = getMemoryStore();
+      store.syncProjects(scanned, true);
+      const saved = store.saveDigest(buildPmDigest(scanned, period));
+      const history = store.listDigests(16);
+      sendJson(req, res, 200, { digest: saved, history });
       return;
     }
 

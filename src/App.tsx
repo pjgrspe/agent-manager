@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from "motion/react";
 import {
   AlertTriangle,
   Bot,
+  Brain,
   Check,
   CheckCircle2,
   ChevronDown,
@@ -31,6 +32,7 @@ import {
   X,
 } from "lucide-react";
 import { ControlCenter } from "./components/ControlCenter.tsx";
+import { MemoryBrain } from "./components/MemoryBrain.tsx";
 import {
   addProject,
   addProjectsBatch,
@@ -57,7 +59,7 @@ import type {
   VerifyHealth,
 } from "./core/types.ts";
 
-type FilterState = "ControlCenter" | "All" | ProjectState;
+type FilterState = "ControlCenter" | "Memory" | "All" | ProjectState;
 
 const SPRING_SNAPPY = { type: "spring" as const, stiffness: 460, damping: 34 };
 const SPRING_SMOOTH = { type: "spring" as const, stiffness: 320, damping: 30 };
@@ -252,7 +254,10 @@ export function App() {
     function onKeyDown(e: KeyboardEvent) {
       const tag = (e.target as HTMLElement | null)?.tagName;
       const inField = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
-      if (e.key === "/" && !inField) {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setFilter("Memory");
+      } else if (e.key === "/" && !inField) {
         e.preventDefault();
         searchInputRef.current?.focus();
       } else if (e.key === "Escape") {
@@ -297,8 +302,9 @@ export function App() {
   }, [projects]);
 
   const filteredProjects = useMemo(() => {
+    const stateFilter = filter === "Memory" ? "All" : filter;
     return projects.filter((p) => {
-      if (!matchesStateFilter(p, filter)) return false;
+      if (!matchesStateFilter(p, stateFilter)) return false;
       if (activeGroup && p.group !== activeGroup) return false;
       if (search.trim()) {
         const q = search.toLowerCase();
@@ -638,6 +644,26 @@ export function App() {
                   </span>
                 </span>
               </button>
+              <button
+                className={`nav-item ${filter === "Memory" ? "active" : ""}`}
+                onClick={() => setFilter("Memory")}
+                title="Cross-agent SQLite FTS5 search & PM digests (Ctrl+K)"
+              >
+                {filter === "Memory" && (
+                  <motion.span
+                    layoutId="nav-active-pill"
+                    className="nav-pill-bg"
+                    transition={SPRING_SNAPPY}
+                  />
+                )}
+                <span className="nav-content">
+                  <span className="nav-left">
+                    <Brain size={13} color="#a78bfa" />
+                    Memory &amp; Digests
+                  </span>
+                  <span className="kbd-hint" style={{ fontSize: 10 }}>⌘K</span>
+                </span>
+              </button>
               {(
                 [
                   { id: "All", label: "All Projects", count: stats.total, dot: "dot-all" },
@@ -779,14 +805,18 @@ export function App() {
               <h1>
                 {filter === "ControlCenter"
                   ? "Control Center"
-                  : filter === "All"
-                    ? "All Projects"
-                    : filter}
+                  : filter === "Memory"
+                    ? "Memory & Digests"
+                    : filter === "All"
+                      ? "All Projects"
+                      : filter}
               </h1>
               <span className="header-count">
                 {filter === "ControlCenter"
                   ? `${stats.total} tracked`
-                  : `${filteredProjects.length} ${filteredProjects.length === 1 ? "repo" : "repos"}`}
+                  : filter === "Memory"
+                    ? "SQLite FTS5"
+                    : `${filteredProjects.length} ${filteredProjects.length === 1 ? "repo" : "repos"}`}
               </span>
             </div>
 
@@ -835,6 +865,8 @@ export function App() {
                 onSyncAll={() => void handleAutoRecapAll()}
                 loading={loading}
               />
+            ) : filter === "Memory" ? (
+              <MemoryBrain onSelectProject={(id) => setSelectedId(id)} />
             ) : (
               <>
             {/* Today at a Glance Hero */}

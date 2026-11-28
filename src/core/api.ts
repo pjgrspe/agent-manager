@@ -1,4 +1,12 @@
-import type { AgentKind, ManagedProject, ProjectStatusData, StandupSummary } from "./types.ts";
+import type {
+  AgentKind,
+  ManagedProject,
+  MemoryIndexStats,
+  MemorySearchHit,
+  PmDigestEntry,
+  ProjectStatusData,
+  StandupSummary,
+} from "./types.ts";
 
 const API_BASE = "/api";
 
@@ -173,4 +181,34 @@ export async function streamProjectExec(
 
 export async function fetchStandup(): Promise<StandupSummary> {
   return requestJson<StandupSummary>("/standup");
+}
+
+export async function searchMemory(
+  q: string,
+  opts?: { source?: string; projectId?: string },
+): Promise<{ results: MemorySearchHit[]; stats: MemoryIndexStats }> {
+  const params = new URLSearchParams();
+  if (q.trim()) params.set("q", q.trim());
+  if (opts?.source) params.set("source", opts.source);
+  if (opts?.projectId) params.set("projectId", opts.projectId);
+  return requestJson<{ results: MemorySearchHit[]; stats: MemoryIndexStats }>(
+    `/memory/search?${params.toString()}`,
+  );
+}
+
+export async function fetchDigests(): Promise<{
+  latestDaily: PmDigestEntry;
+  latestWeekly: PmDigestEntry;
+  history: PmDigestEntry[];
+}> {
+  return requestJson("/digests");
+}
+
+export async function generateDigest(
+  period: "daily" | "weekly",
+): Promise<{ digest: PmDigestEntry; history: PmDigestEntry[] }> {
+  return requestJson("/digests/generate", {
+    method: "POST",
+    body: JSON.stringify({ period }),
+  });
 }

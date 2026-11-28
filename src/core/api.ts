@@ -22,8 +22,8 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   return data;
 }
 
-export async function fetchProjects(): Promise<ManagedProject[]> {
-  const res = await requestJson<{ projects: ManagedProject[] }>("/projects");
+export async function fetchProjects(fresh = false): Promise<ManagedProject[]> {
+  const res = await requestJson<{ projects: ManagedProject[] }>(fresh ? "/projects?fresh=1" : "/projects");
   return res.projects;
 }
 

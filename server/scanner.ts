@@ -54,12 +54,13 @@ async function readBranchFast(repoPath: string): Promise<string> {
   }
 }
 
-async function scanProjectLight(entry: StoredProjectEntry): Promise<ManagedProject> {
+async function scanProjectLight(entry: StoredProjectEntry, forceLive = false): Promise<ManagedProject> {
   const sourceType: ProjectSourceType = entry.sourceType ?? "local";
   if (sourceType === "remote") {
     const github = await readGitHubProjectData({
       githubRepo: entry.githubRepo,
       includeCommits: true,
+      force: forceLive,
     });
     const emptyStatus: ProjectStatusData = {
       state: "Idle",
@@ -193,13 +194,13 @@ export async function getProjectsFast(forceFresh = false): Promise<ManagedProjec
     }
 
     // Cold boot with no disk cache yet: return instant filesystem-only scan (<20ms) and warm Git in background
-    const light = await Promise.all(entries.map(scanProjectLight));
+    const light = await Promise.all(entries.map((e) => scanProjectLight(e)));
     memScanCache = { projects: light, updatedAt: 0 };
     triggerBackgroundRefresh();
     return light;
   }
 
-  return scanAllAndPersist(entries);
+  return scanAllAndPersist(entries, forceFresh);
 }
 
 export function triggerBackgroundRefresh(): void {
@@ -208,7 +209,7 @@ export function triggerBackgroundRefresh(): void {
   void (async () => {
     try {
       const entries = await loadProjectEntries();
-      await scanAllAndPersist(entries);
+      await scanAllAndPersist(entries, false);
     } catch {
       // ignore background refresh error
     } finally {
@@ -223,12 +224,12 @@ export function invalidateScanCache(): void {
   }
 }
 
-async function scanAllAndPersist(entries: StoredProjectEntry[]): Promise<ManagedProject[]> {
+async function scanAllAndPersist(entries: StoredProjectEntry[], forceLive = false): Promise<ManagedProject[]> {
   // Scan with modest concurrency (3 at a time) so Windows process creation stays smooth
   const results: ManagedProject[] = [];
   for (let i = 0; i < entries.length; i += 3) {
     const batch = entries.slice(i, i + 3);
-    const scannedBatch = await Promise.all(batch.map(scanProject));
+    const scannedBatch = await Promise.all(batch.map((e) => scanProject(e, forceLive)));
     results.push(...scannedBatch);
   }
   memScanCache = { projects: results, updatedAt: Date.now() };
@@ -456,10 +457,10 @@ async function inspectStatus(repoPath: string): Promise<ProjectStatusData> {
   }
 }
 
-export async function scanProject(entry: StoredProjectEntry): Promise<ManagedProject> {
+export async function scanProject(entry: StoredProjectEntry, forceLive = false): Promise<ManagedProject> {
   const sourceType: ProjectSourceType = entry.sourceType ?? "local";
   if (sourceType === "remote") {
-    return scanProjectLight(entry);
+    return scanProjectLight(entry, forceLive);
   }
 
   const exists = await pathExists(entry.path);
@@ -512,7 +513,7 @@ export async function scanProject(entry: StoredProjectEntry): Promise<ManagedPro
     inspectAntiSlop(entry.path),
     readClaudeProjectSync(entry.path),
     readAntigravitySessionForRepo(entry.name),
-    readGitHubProjectData({ repoPath: entry.path, githubRepo: entry.githubRepo }),
+    readGitHubProjectData({ repoPath: entry.path, githubRepo: entry.githubRepo, force: forceLive }),
     loadVerifyCache(),
   ]);
 

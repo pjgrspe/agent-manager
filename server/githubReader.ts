@@ -71,89 +71,114 @@ async function runGhJson<T>(args: string[]): Promise<T | null> {
   }
 }
 
-function refreshSlugInBackground(slug: string, includeCommits: boolean): void {
+async function fetchSlugLive(slug: string, includeCommits: boolean): Promise<GitHubSyncData> {
   const cacheKey = `${slug}:${includeCommits ? "r" : "l"}`;
-  if (inFlight.has(cacheKey)) return;
   inFlight.add(cacheKey);
+  const now = Date.now();
+  try {
+    const [openPrRaw, mergedPrRaw, issuesRaw, milestonesRaw, commitsRaw] = await Promise.all([
+      runGhJson<
+        Array<{
+          number: number;
+          title: string;
+          url: string;
+          isDraft?: boolean;
+          reviewDecision?: string;
+          headRefName?: string;
+          reviews?: Array<{ state?: string; author?: { login?: string } }>;
+          comments?: Array<{ author?: { login?: string } }>;
+          statusCheckRollup?: Array<{
+            conclusion?: string | null;
+            status?: string | null;
+            state?: string | null;
+          }>;
+        }>
+      >([
+        "pr",
+        "list",
+        "-R",
+        slug,
+        "--state",
+        "open",
+        "--limit",
+        "6",
+        "--json",
+        "number,title,url,isDraft,reviewDecision,headRefName,reviews,comments,statusCheckRollup",
+      ]),
+      runGhJson<Array<{ number: number; title: string; url: string; mergedAt?: string }>>([
+        "pr",
+        "list",
+        "-R",
+        slug,
+        "--state",
+        "merged",
+        "--limit",
+        "5",
+        "--json",
+        "number,title,url,mergedAt",
+      ]),
+      runGhJson<Array<{ number: number; title: string; url: string; labels?: Array<{ name: string }> }>>([
+        "issue",
+        "list",
+        "-R",
+        slug,
+        "--state",
+        "open",
+        "--limit",
+        "8",
+        "--json",
+        "number,title,url,labels",
+      ]),
+      runGhJson<
+        Array<{
+          title: string;
+          open_issues: number;
+          closed_issues: number;
+          due_on?: string | null;
+          html_url: string;
+        }>
+      >(["api", `repos/${slug}/milestones?state=open&per_page=5`]),
+      includeCommits
+        ? runGhJson<
+            Array<{
+              sha: string;
+              commit: { message: string; committer?: { date?: string }; author?: { date?: string } };
+            }>
+          >(["api", `repos/${slug}/commits?per_page=15`])
+        : Promise.resolve(null),
+    ]);
 
-  void (async () => {
-    const now = Date.now();
-    try {
-      const [openPrRaw, mergedPrRaw, issuesRaw, milestonesRaw, commitsRaw] = await Promise.all([
-        runGhJson<
-          Array<{
-            number: number;
-            title: string;
-            url: string;
-            isDraft?: boolean;
-            reviewDecision?: string;
-            headRefName?: string;
-            statusCheckRollup?: Array<{
-              conclusion?: string | null;
-              status?: string | null;
-              state?: string | null;
-            }>;
-          }>
-        >([
-          "pr",
-          "list",
-          "-R",
-          slug,
-          "--state",
-          "open",
-          "--limit",
-          "6",
-          "--json",
-          "number,title,url,isDraft,reviewDecision,headRefName,statusCheckRollup",
-        ]),
-        runGhJson<Array<{ number: number; title: string; url: string; mergedAt?: string }>>([
-          "pr",
-          "list",
-          "-R",
-          slug,
-          "--state",
-          "merged",
-          "--limit",
-          "5",
-          "--json",
-          "number,title,url,mergedAt",
-        ]),
-        runGhJson<Array<{ number: number; title: string; url: string; labels?: Array<{ name: string }> }>>([
-          "issue",
-          "list",
-          "-R",
-          slug,
-          "--state",
-          "open",
-          "--limit",
-          "8",
-          "--json",
-          "number,title,url,labels",
-        ]),
-        runGhJson<
-          Array<{
-            title: string;
-            open_issues: number;
-            closed_issues: number;
-            due_on?: string | null;
-            html_url: string;
-          }>
-        >(["api", `repos/${slug}/milestones?state=open&per_page=5`]),
-        includeCommits
-          ? runGhJson<
-              Array<{
-                sha: string;
-                commit: { message: string; committer?: { date?: string }; author?: { date?: string } };
-              }>
-            >(["api", `repos/${slug}/commits?per_page=15`])
-          : Promise.resolve(null),
-      ]);
+    const anySuccess =
+      openPrRaw !== null || mergedPrRaw !== null || issuesRaw !== null || milestonesRaw !== null;
 
-      const anySuccess =
-        openPrRaw !== null || mergedPrRaw !== null || issuesRaw !== null || milestonesRaw !== null;
+    const openPrs: PullRequestInfo[] = Array.isArray(openPrRaw)
+      ? openPrRaw.map((pr) => {
+          const reviews = Array.isArray(pr.reviews) ? pr.reviews : [];
+          const comments = Array.isArray(pr.comments) ? pr.comments : [];
+          const approvedBy = Array.from(
+            new Set(
+              reviews
+                .filter((r) => (r.state ?? "").toUpperCase() === "APPROVED")
+                .map((r) => r.author?.login)
+                .filter((login): login is string => Boolean(login)),
+            ),
+          );
+          const hasChangesRequested =
+            pr.reviewDecision === "CHANGES_REQUESTED" ||
+            reviews.some((r) => (r.state ?? "").toUpperCase() === "CHANGES_REQUESTED");
+          const isApproved = pr.reviewDecision === "APPROVED" || approvedBy.length > 0;
+          const commentCount =
+            comments.length +
+            reviews.filter((r) => (r.state ?? "").toUpperCase() === "COMMENTED").length;
+          const reviewState: PullRequestInfo["reviewState"] = hasChangesRequested
+            ? "Changes Requested"
+            : isApproved
+              ? "Approved"
+              : commentCount > 0
+                ? "Commented"
+                : "Pending";
 
-      const openPrs: PullRequestInfo[] = Array.isArray(openPrRaw)
-        ? openPrRaw.map((pr) => ({
+          return {
             number: pr.number,
             title: pr.title,
             url: pr.url,
@@ -161,72 +186,85 @@ function refreshSlugInBackground(slug: string, includeCommits: boolean): void {
             reviewDecision: pr.reviewDecision ?? "",
             branch: pr.headRefName ?? "",
             ciStatus: summarizeChecks(pr.statusCheckRollup),
-          }))
-        : [];
+            approvedBy,
+            commentCount,
+            reviewState,
+          };
+        })
+      : [];
 
-      const mergedPrs: MergedPrInfo[] = Array.isArray(mergedPrRaw)
-        ? mergedPrRaw.map((pr) => ({
-            number: pr.number,
-            title: pr.title,
-            url: pr.url,
-            mergedAt: (pr.mergedAt ?? "").slice(0, 10),
-          }))
-        : [];
+    const mergedPrs: MergedPrInfo[] = Array.isArray(mergedPrRaw)
+      ? mergedPrRaw.map((pr) => ({
+          number: pr.number,
+          title: pr.title,
+          url: pr.url,
+          mergedAt: (pr.mergedAt ?? "").slice(0, 10),
+        }))
+      : [];
 
-      const openIssues: GitHubIssueInfo[] = Array.isArray(issuesRaw)
-        ? issuesRaw.map((iss) => ({
-            number: iss.number,
-            title: iss.title,
-            url: iss.url,
-            labels: Array.isArray(iss.labels) ? iss.labels.map((l) => l.name) : [],
-          }))
-        : [];
+    const openIssues: GitHubIssueInfo[] = Array.isArray(issuesRaw)
+      ? issuesRaw.map((iss) => ({
+          number: iss.number,
+          title: iss.title,
+          url: iss.url,
+          labels: Array.isArray(iss.labels) ? iss.labels.map((l) => l.name) : [],
+        }))
+      : [];
 
-      const milestones: GitHubMilestoneInfo[] = Array.isArray(milestonesRaw)
-        ? milestonesRaw.map((m) => ({
-            title: m.title,
-            openIssues: m.open_issues ?? 0,
-            closedIssues: m.closed_issues ?? 0,
-            dueOn: m.due_on ? m.due_on.slice(0, 10) : null,
-            url: m.html_url,
-          }))
-        : [];
+    const milestones: GitHubMilestoneInfo[] = Array.isArray(milestonesRaw)
+      ? milestonesRaw.map((m) => ({
+          title: m.title,
+          openIssues: m.open_issues ?? 0,
+          closedIssues: m.closed_issues ?? 0,
+          dueOn: m.due_on ? m.due_on.slice(0, 10) : null,
+          url: m.html_url,
+        }))
+      : [];
 
-      const remoteCommits: GitCommitSummary[] = Array.isArray(commitsRaw)
-        ? commitsRaw.map((c) => {
-            const iso = c.commit.committer?.date ?? c.commit.author?.date ?? "";
-            return {
-              hash: c.sha.slice(0, 7),
-              date: iso.slice(0, 10),
-              subject: (c.commit.message.split(/\r?\n/)[0] ?? "").trim(),
-            };
-          })
-        : [];
+    const remoteCommits: GitCommitSummary[] = Array.isArray(commitsRaw)
+      ? commitsRaw.map((c) => {
+          const iso = c.commit.committer?.date ?? c.commit.author?.date ?? "";
+          return {
+            hash: c.sha.slice(0, 7),
+            date: iso.slice(0, 10),
+            subject: (c.commit.message.split(/\r?\n/)[0] ?? "").trim(),
+          };
+        })
+      : [];
 
-      cache.set(cacheKey, {
-        data: {
-          available: anySuccess,
-          repoSlug: slug,
-          openPrs,
-          mergedPrs,
-          openIssues,
-          milestones,
-          remoteCommits,
-          fetchedAt: anySuccess ? new Date(now).toISOString() : null,
-        },
-        expiresAt: now + CACHE_TTL_MS,
-      });
-    } finally {
-      inFlight.delete(cacheKey);
-    }
-  })();
+    const data: GitHubSyncData = {
+      available: anySuccess,
+      repoSlug: slug,
+      openPrs,
+      mergedPrs,
+      openIssues,
+      milestones,
+      remoteCommits,
+      fetchedAt: anySuccess ? new Date(now).toISOString() : null,
+    };
+
+    cache.set(cacheKey, {
+      data,
+      expiresAt: now + CACHE_TTL_MS,
+    });
+    return data;
+  } finally {
+    inFlight.delete(cacheKey);
+  }
 }
 
-// Non-blocking stale-while-revalidate: works for BOTH local repos and remote-only GitHub owner/repo
+function refreshSlugInBackground(slug: string, includeCommits: boolean): void {
+  const cacheKey = `${slug}:${includeCommits ? "r" : "l"}`;
+  if (inFlight.has(cacheKey)) return;
+  void fetchSlugLive(slug, includeCommits);
+}
+
+// Non-blocking stale-while-revalidate by default; when force=true, fetches live from GitHub immediately
 export async function readGitHubProjectData(opts: {
   repoPath?: string;
   githubRepo?: string;
   includeCommits?: boolean;
+  force?: boolean;
 }): Promise<GitHubSyncData> {
   const slug =
     opts.githubRepo?.trim() ||
@@ -248,6 +286,12 @@ export async function readGitHubProjectData(opts: {
   const includeCommits = Boolean(opts.includeCommits);
   const cacheKey = `${slug}:${includeCommits ? "r" : "l"}`;
   const now = Date.now();
+
+  if (opts.force) {
+    cache.delete(cacheKey);
+    return fetchSlugLive(slug, includeCommits);
+  }
+
   const cached = cache.get(cacheKey);
 
   if (!cached || cached.expiresAt <= now) {

@@ -192,13 +192,16 @@ export function App() {
     return () => window.clearTimeout(id);
   }, [toast]);
 
-  const loadAll = useCallback(async (silent = false) => {
+  const loadAll = useCallback(async (silent = false, fresh = false) => {
     if (!silent) setLoading(true);
     setError(null);
     try {
-      const list = await fetchProjects();
+      const list = await fetchProjects(fresh);
       setProjects(list);
       setSelectedId((prev) => (prev && list.some((p) => p.id === prev) ? prev : null));
+      if (fresh) {
+        showToast("Refreshed live", "Pulled latest Git & GitHub PR status");
+      }
     } catch (e) {
       if (!silent) {
         setError(e instanceof Error ? e.message : "Failed to load projects");
@@ -206,7 +209,7 @@ export function App() {
     } finally {
       if (!silent) setLoading(false);
     }
-  }, []);
+  }, [showToast]);
 
   useEffect(() => {
     void loadAll(false);
@@ -648,8 +651,8 @@ export function App() {
               <motion.button
                 whileTap={{ scale: 0.94 }}
                 className="btn btn-ghost"
-                title="Refresh workspace"
-                onClick={() => void loadAll()}
+                title="Refresh live from Git & GitHub"
+                onClick={() => void loadAll(false, true)}
                 disabled={loading}
               >
                 <RefreshCw size={14} />
@@ -1170,28 +1173,66 @@ export function App() {
                     {selectedProject.github && selectedProject.github.openPrs.length > 0 && (
                       <div>
                         <div className="insp-section-title">
-                          <span>Waiting for Review</span>
+                          <span>Open Pull Requests</span>
                           <span className="nav-count">{selectedProject.github.openPrs.length}</span>
                         </div>
                         <div className="checklist">
-                          {selectedProject.github.openPrs.map((pr) => (
-                            <a
-                              key={pr.number}
-                              href={pr.url}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="check-row"
-                              style={{ textDecoration: "none", color: "inherit" }}
-                            >
-                              <GitPullRequest size={13} color={pr.ciStatus === "Fail" ? "#fb7185" : "#fbbf24"} />
-                              <div style={{ flex: 1, minWidth: 0 }}>
-                                <div style={{ fontWeight: 550 }}>
-                                  #{pr.number} {pr.title}
+                          {selectedProject.github.openPrs.map((pr) => {
+                            const statusLabel =
+                              pr.reviewState === "Approved"
+                                ? pr.approvedBy?.length
+                                  ? `Approved by ${pr.approvedBy[0]}`
+                                  : "Approved"
+                                : pr.reviewState === "Changes Requested"
+                                  ? "Changes requested"
+                                  : pr.reviewState === "Commented"
+                                    ? "Commented"
+                                    : "Needs review";
+                            const statusCls =
+                              pr.reviewState === "Approved"
+                                ? "pill-pass"
+                                : pr.reviewState === "Changes Requested"
+                                  ? "pill-blocked"
+                                  : pr.reviewState === "Commented"
+                                    ? "pill-active"
+                                    : "pill-review";
+                            return (
+                              <a
+                                key={pr.number}
+                                href={pr.url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="check-row"
+                                style={{ textDecoration: "none", color: "inherit", alignItems: "flex-start" }}
+                              >
+                                <GitPullRequest
+                                  size={13}
+                                  color={
+                                    pr.reviewState === "Approved"
+                                      ? "#34d399"
+                                      : pr.ciStatus === "Fail" || pr.reviewState === "Changes Requested"
+                                        ? "#fb7185"
+                                        : "#fbbf24"
+                                  }
+                                  style={{ marginTop: 2, flexShrink: 0 }}
+                                />
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <div style={{ fontWeight: 550, lineHeight: 1.35 }}>
+                                    #{pr.number} {pr.title}
+                                  </div>
+                                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 5 }}>
+                                    <span className={`pill-badge ${statusCls}`}>{statusLabel}</span>
+                                    {(pr.commentCount ?? 0) > 0 && (
+                                      <span className="mono-tag">
+                                        {pr.commentCount} comment{pr.commentCount === 1 ? "" : "s"}
+                                      </span>
+                                    )}
+                                  </div>
                                 </div>
-                              </div>
-                              <ExternalLink size={12} color="var(--text-muted)" />
-                            </a>
-                          ))}
+                                <ExternalLink size={12} color="var(--text-muted)" style={{ marginTop: 2 }} />
+                              </a>
+                            );
+                          })}
                         </div>
                       </div>
                     )}

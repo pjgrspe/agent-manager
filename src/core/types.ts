@@ -43,6 +43,9 @@ export interface PullRequestInfo {
   reviewDecision: string;
   branch: string;
   ciStatus: "Pass" | "Fail" | "Pending" | "None";
+  approvedBy?: string[];
+  commentCount?: number;
+  reviewState?: "Approved" | "Changes Requested" | "Commented" | "Pending";
 }
 
 export interface MergedPrInfo {

@@ -172,7 +172,7 @@ const server = http.createServer(async (req, res) => {
       const scanned = await getProjectsFast(fresh);
       try {
         const store = getMemoryStore();
-        store.syncProjects(scanned);
+        store.syncProjects(scanned, fresh);
         store.recordScheduledDigestsIfDue(scanned);
       } catch {
         // Non-fatal: keep project listing fast even if SQLite is locked
@@ -281,7 +281,7 @@ const server = http.createServer(async (req, res) => {
         });
         await saveProjectEntries(entries);
       }
-      const scanned = await Promise.all(entries.map(scanProject));
+      const scanned = await Promise.all(entries.map((e) => scanProject(e)));
       sendJson(req, res, 200, { projects: scanned });
       return;
     }
@@ -322,7 +322,7 @@ const server = http.createServer(async (req, res) => {
         }
       }
       await saveProjectEntries(entries);
-      const scanned = await Promise.all(entries.map(scanProject));
+      const scanned = await Promise.all(entries.map((e) => scanProject(e)));
       sendJson(req, res, 200, { added, projects: scanned });
       return;
     }
@@ -344,7 +344,7 @@ const server = http.createServer(async (req, res) => {
         target.name = body.name.trim();
       }
       await saveProjectEntries(entries);
-      const scanned = await Promise.all(entries.map(scanProject));
+      const scanned = await Promise.all(entries.map((e) => scanProject(e)));
       sendJson(req, res, 200, { projects: scanned });
       return;
     }
@@ -369,7 +369,7 @@ const server = http.createServer(async (req, res) => {
         }
       }
       await saveProjectEntries(entries);
-      const scanned = await Promise.all(entries.map(scanProject));
+      const scanned = await Promise.all(entries.map((e) => scanProject(e)));
       sendJson(req, res, 200, { added, alreadyTracked, totalFound: discovered.length, projects: scanned });
       return;
     }
@@ -379,7 +379,7 @@ const server = http.createServer(async (req, res) => {
       const id = decodeURIComponent(deleteMatch[1]);
       const entries = (await loadProjectEntries()).filter((e) => e.id !== id);
       await saveProjectEntries(entries);
-      const scanned = await Promise.all(entries.map(scanProject));
+      const scanned = await Promise.all(entries.map((e) => scanProject(e)));
       sendJson(req, res, 200, { projects: scanned });
       return;
     }

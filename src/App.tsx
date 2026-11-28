@@ -17,17 +17,19 @@ import {
   GitPullRequest,
   Globe,
   LayoutDashboard,
-  Layers,
+  Moon,
   Plus,
   RefreshCw,
   Search,
   Sparkles,
+  Sun,
   Target,
   Trash2,
   X,
 } from "lucide-react";
 import { ControlCenter } from "./components/ControlCenter.tsx";
 import { MemoryBrain } from "./components/MemoryBrain.tsx";
+import { MeridianLogo } from "./components/MeridianLogo.tsx";
 import {
   addProject,
   addProjectsBatch,
@@ -168,6 +170,15 @@ export function App() {
   const [toast, setToast] = useState<{ label: string; detail?: string } | null>(null);
   const [showClaudeMemory, setShowClaudeMemory] = useState(false);
   const [inspectorTab, setInspectorTab] = useState<"summary" | "activity" | "settings">("summary");
+  const [theme, setTheme] = useState<"dark" | "light">(() => {
+    const saved = localStorage.getItem("meridian:theme");
+    return saved === "light" ? "light" : "dark";
+  });
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    localStorage.setItem("meridian:theme", theme);
+  }, [theme]);
 
   const searchInputRef = useRef<HTMLInputElement>(null);
 
@@ -468,14 +479,22 @@ export function App() {
       <div className={`workspace ${selectedProject ? "has-inspector" : ""}`}>
         {/* Left Navigation Rail */}
         <aside className="rail">
-          <div className="brand-mark">
-            <span className="brand-icon">
-              <Layers size={15} strokeWidth={2.3} />
-            </span>
-            <div>
-              <div className="brand-title">Meridian</div>
-              <div className="brand-sub">Project Manager</div>
+          <div className="brand-mark" style={{ justifyContent: "space-between" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <MeridianLogo size={32} />
+              <div>
+                <div className="brand-title">Meridian</div>
+                <div className="brand-sub">Project Manager</div>
+              </div>
             </div>
+            <button
+              className="btn btn-ghost btn-xs"
+              onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
+              title={theme === "dark" ? "Switch to Daylight theme" : "Switch to Midnight theme"}
+              aria-label="Toggle color theme"
+            >
+              {theme === "dark" ? <Sun size={14} /> : <Moon size={14} />}
+            </button>
           </div>
 
           <div>

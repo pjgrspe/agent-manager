@@ -75,8 +75,9 @@ async function createWindow() {
     height: 900,
     minWidth: 960,
     minHeight: 640,
-    backgroundColor: "#07070a",
+    backgroundColor: "#070910",
     title: "Meridian — Project Manager",
+    icon: path.join(__dirname, "icon.png"),
     autoHideMenuBar: true,
     webPreferences: {
       contextIsolation: true,

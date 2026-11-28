@@ -34,6 +34,154 @@ export interface StoredProjectEntry {
 const DATA_DIR = path.resolve(process.cwd(), ".data");
 const PROJECTS_FILE = path.join(DATA_DIR, "projects.json");
 const VERIFY_CACHE_FILE = path.join(DATA_DIR, "verify-cache.json");
+const SCAN_CACHE_FILE = path.join(DATA_DIR, "scan-cache.json");
+
+let memScanCache: { projects: ManagedProject[]; updatedAt: number } | null = null;
+let bgScanRunning = false;
+
+async function readBranchFast(repoPath: string): Promise<string> {
+  try {
+    const head = (await fs.readFile(path.join(repoPath, ".git", "HEAD"), "utf8")).trim();
+    if (head.startsWith("ref: refs/heads/")) return head.slice("ref: refs/heads/".length);
+    return head.slice(0, 7) || "HEAD";
+  } catch {
+    return "";
+  }
+}
+
+async function scanProjectLight(entry: StoredProjectEntry): Promise<ManagedProject> {
+  const exists = await pathExists(entry.path);
+  const [status, antiSlop, branch] = exists
+    ? await Promise.all([inspectStatus(entry.path), inspectAntiSlop(entry.path), readBranchFast(entry.path)])
+    : [
+        {
+          state: "Blocked" as const,
+          updated: "",
+          verify: "Unknown" as const,
+          recap: [],
+          plan: [],
+          blockers: ["Directory not found on disk"],
+          hasStatusFile: false,
+        },
+        {
+          hasAgentsMd: false,
+          hasClaudeMd: false,
+          hasSkill: false,
+          hasLearnings: false,
+          verifyCmd: null,
+          skillCount: 0,
+        },
+        "",
+      ];
+
+  const git: ProjectGitData = {
+    isGitRepo: Boolean(branch),
+    branch,
+    headSha: "",
+    headTimestamp: null,
+    dirtyCount: 0,
+    ahead: 0,
+    behind: 0,
+    recentCommits: [],
+  };
+
+  const truth = computeGroundTruth({ exists, status, git });
+  return {
+    id: entry.id,
+    name: entry.name,
+    path: entry.path,
+    group: entry.group,
+    exists,
+    status: { ...status, state: truth.state, verify: truth.verifyHealth },
+    git,
+    antiSlop,
+    truth,
+  };
+}
+
+export async function getProjectsFast(forceFresh = false): Promise<ManagedProject[]> {
+  const entries = await loadProjectEntries();
+  if (entries.length === 0) return [];
+
+  if (!forceFresh) {
+    if (!memScanCache) {
+      try {
+        const raw = await fs.readFile(SCAN_CACHE_FILE, "utf8");
+        const parsed = JSON.parse(raw) as { projects?: ManagedProject[]; updatedAt?: number };
+        if (Array.isArray(parsed.projects)) {
+          memScanCache = { projects: parsed.projects, updatedAt: parsed.updatedAt ?? 0 };
+        }
+      } catch {
+        // no disk cache yet
+      }
+    }
+
+    if (memScanCache) {
+      const byId = new Map(memScanCache.projects.map((p) => [p.id, p]));
+      const aligned: ManagedProject[] = [];
+      for (const e of entries) {
+        const cached = byId.get(e.id);
+        if (cached) {
+          aligned.push({ ...cached, name: e.name, group: e.group });
+        } else {
+          aligned.push(await scanProjectLight(e));
+        }
+      }
+
+      if (Date.now() - memScanCache.updatedAt > 20_000 || aligned.length !== memScanCache.projects.length) {
+        triggerBackgroundRefresh();
+      }
+      return aligned;
+    }
+
+    // Cold boot with no disk cache yet: return instant filesystem-only scan (<20ms) and warm Git in background
+    const light = await Promise.all(entries.map(scanProjectLight));
+    memScanCache = { projects: light, updatedAt: 0 };
+    triggerBackgroundRefresh();
+    return light;
+  }
+
+  return scanAllAndPersist(entries);
+}
+
+export function triggerBackgroundRefresh(): void {
+  if (bgScanRunning) return;
+  bgScanRunning = true;
+  void (async () => {
+    try {
+      const entries = await loadProjectEntries();
+      await scanAllAndPersist(entries);
+    } catch {
+      // ignore background refresh error
+    } finally {
+      bgScanRunning = false;
+    }
+  })();
+}
+
+export function invalidateScanCache(): void {
+  if (memScanCache) {
+    memScanCache.updatedAt = 0;
+  }
+}
+
+async function scanAllAndPersist(entries: StoredProjectEntry[]): Promise<ManagedProject[]> {
+  // Scan with modest concurrency (3 at a time) so Windows process creation stays smooth
+  const results: ManagedProject[] = [];
+  for (let i = 0; i < entries.length; i += 3) {
+    const batch = entries.slice(i, i + 3);
+    const scannedBatch = await Promise.all(batch.map(scanProject));
+    results.push(...scannedBatch);
+  }
+  memScanCache = { projects: results, updatedAt: Date.now() };
+  try {
+    await fs.mkdir(DATA_DIR, { recursive: true });
+    await fs.writeFile(SCAN_CACHE_FILE, JSON.stringify(memScanCache), "utf8");
+  } catch {
+    // ignore cache write error
+  }
+  return results;
+}
 
 export async function loadVerifyCache(): Promise<Record<string, VerifyCacheRecord>> {
   try {
@@ -113,9 +261,9 @@ export function createId(repoPath: string): string {
 
 async function runGit(repoPath: string, args: string[]): Promise<string | null> {
   try {
-    const { stdout } = await execFileAsync("git", args, {
+    const { stdout } = await execFileAsync("git", ["--no-optional-locks", ...args], {
       cwd: repoPath,
-      timeout: 4000,
+      timeout: 15000,
       windowsHide: true,
     });
     return stdout.trim();

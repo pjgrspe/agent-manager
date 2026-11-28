@@ -9,7 +9,9 @@ import {
   createId,
   detectVerifyCommand,
   discoverReposInFolder,
+  getProjectsFast,
   installBastionIntoRepo,
+  invalidateScanCache,
   loadProjectEntries,
   recordVerifyRun,
   saveProjectEntries,
@@ -160,15 +162,14 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === "GET" && pathname === "/api/projects") {
-      const entries = await loadProjectEntries();
-      const scanned = await Promise.all(entries.map(scanProject));
+      const fresh = url.searchParams.get("fresh") === "1";
+      const scanned = await getProjectsFast(fresh);
       sendJson(req, res, 200, { projects: scanned });
       return;
     }
 
     if (req.method === "GET" && pathname === "/api/standup") {
-      const entries = await loadProjectEntries();
-      const scanned = await Promise.all(entries.map(scanProject));
+      const scanned = await getProjectsFast(false);
       sendJson(req, res, 200, buildStandupSummary(scanned));
       return;
     }
@@ -307,6 +308,7 @@ const server = http.createServer(async (req, res) => {
       }
       const body = await readJsonBody<Omit<ProjectStatusData, "hasStatusFile">>(req);
       const updatedStatus = await writeProjectStatus(target.path, body);
+      invalidateScanCache();
       sendJson(req, res, 200, { status: updatedStatus });
       return;
     }

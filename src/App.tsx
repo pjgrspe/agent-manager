@@ -109,7 +109,7 @@ function ProgressRing({
           cy={size / 2}
           r={radius}
           fill="none"
-          stroke="rgba(255,255,255,0.08)"
+          stroke="var(--border-strong)"
           strokeWidth={stroke}
         />
         <motion.circle
@@ -984,18 +984,18 @@ export function App() {
                                 <div className="row-details">
                                   <div className="row-line">
                                     <span className="row-line-label">Latest</span>
-                                    <span className="row-line-text">{latestRecap}</span>
+                                    <span className="row-line-text">{cleanText(latestRecap)}</span>
                                   </div>
                                   {nextPlan && (
                                     <div className="row-line">
                                       <span className="row-line-label">Next up</span>
-                                      <span className="row-line-text">{nextPlan.text}</span>
+                                      <span className="row-line-text">{cleanText(nextPlan.text)}</span>
                                     </div>
                                   )}
                                   {project.status.blockers.length > 0 && (
                                     <div className="row-blocker">
                                       <AlertTriangle size={12} />
-                                      <span className="row-line-text">{project.status.blockers[0]}</span>
+                                      <span className="row-line-text">{cleanText(project.status.blockers[0]!)}</span>
                                     </div>
                                   )}
                                 </div>

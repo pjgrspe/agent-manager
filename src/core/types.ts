@@ -65,6 +65,7 @@ export interface ClaudeSyncData {
   sessionTodos: PlanItem[];
   memoryFlags: string[];
   memoryCount: number;
+  memoryIndex?: string | null;
 }
 
 export interface GroundTruthSummary {

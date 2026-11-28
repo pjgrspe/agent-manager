@@ -181,6 +181,7 @@ export function App() {
   const [execMode, setExecMode] = useState<"agent" | "shell">("agent");
   const [consoleOutput, setConsoleOutput] = useState("");
   const [runningExec, setRunningExec] = useState(false);
+  const [showClaudeMemory, setShowClaudeMemory] = useState(false);
   const execAbortRef = useRef<AbortController | null>(null);
   const consoleEndRef = useRef<HTMLDivElement>(null);
 
@@ -531,6 +532,20 @@ export function App() {
     execAbortRef.current?.abort();
     setRunningExec(false);
     setConsoleOutput((prev) => prev + "\n[stopped by user]\n");
+  }
+
+  async function handleSyncStatusWithClaude(project: ManagedProject) {
+    const prompt = [
+      "Reconcile this project's real status into .agents/status.md so Citadel and Claude Code match 100%.",
+      "Read your project memory (MEMORY.md + recent memory files) and recent git log, then update .agents/status.md with:",
+      "1) State (Active | Waiting on Review | Blocked | Idle),",
+      "2) Last Recap (what was actually fixed/shipped recently),",
+      "3) Current Plan (exact next unchecked milestones you would recommend if asked 'what is next?'),",
+      "4) Blockers / Decisions Needed (only real current blockers, or _(none)_).",
+      "Keep .agents/status.md under 50 lines and print a brief 3-line summary when done.",
+    ].join(" ");
+    showToast(`Syncing ${project.name} with Claude`, "Reconciling MEMORY.md + git -> .agents/status.md");
+    await handleRunExec(project, "agent", prompt);
   }
 
   async function handleDelegateMilestone(project: ManagedProject, milestoneText: string) {
@@ -1426,10 +1441,29 @@ export function App() {
                             : "Unknown"}
                         </span>
                       </div>
-                      <div style={{ fontSize: 11.5, color: "var(--text-muted)" }}>
-                        {selectedProject.claudeSync.sessionTodos.length} live session task(s) ·{" "}
-                        {selectedProject.claudeSync.memoryFlags.length} memory flag(s) detected
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                        <motion.button
+                          whileTap={{ scale: 0.96 }}
+                          className="btn btn-xs btn-primary"
+                          disabled={runningExec}
+                          onClick={() => void handleSyncStatusWithClaude(selectedProject)}
+                        >
+                          <RefreshCw size={11} /> Sync Status with Claude
+                        </motion.button>
+                        {selectedProject.claudeSync.memoryIndex && (
+                          <button
+                            className="btn btn-xs"
+                            onClick={() => setShowClaudeMemory((v) => !v)}
+                          >
+                            {showClaudeMemory ? "Hide MEMORY.md" : "View Claude MEMORY.md"}
+                          </button>
+                        )}
                       </div>
+                      {showClaudeMemory && selectedProject.claudeSync.memoryIndex && (
+                        <div className="console-box" style={{ maxHeight: 210 }}>
+                          {selectedProject.claudeSync.memoryIndex}
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}

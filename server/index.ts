@@ -109,7 +109,11 @@ function resolveExecCommand(
   if (agent === "codex") {
     return { command: "codex", args: cleanPrompt ? ["exec", cleanPrompt] : [], label: `codex exec "${cleanPrompt}"` };
   }
-  return { command: "claude", args: cleanPrompt ? ["-p", cleanPrompt] : [], label: `claude -p "${cleanPrompt}"` };
+  return {
+    command: "claude",
+    args: cleanPrompt ? ["-p", cleanPrompt, "--permission-mode", "acceptEdits"] : [],
+    label: `claude -p "${cleanPrompt}"`,
+  };
 }
 
 function buildAgentCommand(repoPath: string, agent: AgentKind = "claude", initialPrompt?: string): string {
@@ -440,6 +444,7 @@ const server = http.createServer(async (req, res) => {
             // ignore status write error
           }
         }
+        invalidateScanCache();
         res.end();
       });
       return;

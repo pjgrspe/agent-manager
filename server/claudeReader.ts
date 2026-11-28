@@ -144,9 +144,17 @@ export async function readClaudeProjectSync(
 
   const memoryFlags: string[] = [];
   let memoryCount = 0;
+  let memoryIndex: string | null = null;
 
   try {
     const memDir = path.join(projectDir, "memory");
+    try {
+      const rawIndex = await fs.readFile(path.join(memDir, "MEMORY.md"), "utf8");
+      memoryIndex = rawIndex.trim().slice(0, 4000) || null;
+    } catch {
+      memoryIndex = null;
+    }
+
     const memEntries = await fs.readdir(memDir, { withFileTypes: true });
     const mdFiles = await Promise.all(
       memEntries
@@ -181,5 +189,6 @@ export async function readClaudeProjectSync(
     sessionTodos,
     memoryFlags,
     memoryCount,
+    memoryIndex,
   };
 }

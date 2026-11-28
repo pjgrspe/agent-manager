@@ -42,7 +42,7 @@ import {
   updateProjectStatus,
   type ScanCandidate,
 } from "./core/api.ts";
-import { isProjectBlocked, matchesStateFilter } from "./core/statusParser.ts";
+import { classifyAttentionItems, isProjectBlocked, matchesStateFilter } from "./core/statusParser.ts";
 import type {
   ManagedProject,
   ProjectState,
@@ -1140,35 +1140,102 @@ export function App() {
                       )}
                     </div>
 
-                    {selectedProject.status.blockers.length > 0 && (
-                      <div>
-                        <div className="insp-section-title">
-                          <span>Needs Your Decision</span>
-                          <span className="nav-count">{selectedProject.status.blockers.length}</span>
-                        </div>
-                        <div className="checklist">
-                          {selectedProject.status.blockers.map((b, idx) => (
-                            <div
-                              key={idx}
-                              className="row-blocker"
-                              style={{ width: "100%", justifyContent: "space-between", alignItems: "flex-start" }}
-                            >
-                              <span style={{ flex: 1, lineHeight: 1.4 }}>{cleanText(b)}</span>
-                              <button
-                                className="btn btn-xs"
-                                onClick={() =>
-                                  void saveStatusUpdate(selectedProject, {
-                                    blockers: selectedProject.status.blockers.filter((_, i) => i !== idx),
-                                  })
-                                }
-                              >
-                                Done
-                              </button>
+                    {(() => {
+                      const attn = classifyAttentionItems(selectedProject.status.blockers);
+                      return (
+                        <>
+                          {attn.blockers.length > 0 && (
+                            <div>
+                              <div className="insp-section-title">
+                                <span>Blockers</span>
+                                <span className="nav-count">{attn.blockers.length}</span>
+                              </div>
+                              <div className="checklist">
+                                {attn.blockers.map((b, idx) => (
+                                  <div
+                                    key={`blk-${idx}`}
+                                    className="row-blocker"
+                                    style={{ width: "100%", justifyContent: "space-between", alignItems: "flex-start" }}
+                                  >
+                                    <span style={{ flex: 1, lineHeight: 1.4 }}>{cleanText(b)}</span>
+                                    <button
+                                      className="btn btn-xs"
+                                      onClick={() =>
+                                        void saveStatusUpdate(selectedProject, {
+                                          blockers: selectedProject.status.blockers.filter((x) => x !== b),
+                                        })
+                                      }
+                                    >
+                                      Resolve
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
                             </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
+                          )}
+
+                          {attn.decisions.length > 0 && (
+                            <div>
+                              <div className="insp-section-title">
+                                <span>Open Decisions</span>
+                                <span className="nav-count">{attn.decisions.length}</span>
+                              </div>
+                              <div className="checklist">
+                                {attn.decisions.map((d, idx) => (
+                                  <div
+                                    key={`dec-${idx}`}
+                                    className="check-row"
+                                    style={{
+                                      borderColor: "rgba(251, 191, 36, 0.3)",
+                                      background: "var(--amber-soft)",
+                                      alignItems: "flex-start",
+                                    }}
+                                  >
+                                    <span style={{ flex: 1, lineHeight: 1.4 }}>{cleanText(d)}</span>
+                                    <button
+                                      className="btn btn-xs"
+                                      onClick={() =>
+                                        void saveStatusUpdate(selectedProject, {
+                                          blockers: selectedProject.status.blockers.filter((x) => x !== d),
+                                        })
+                                      }
+                                    >
+                                      Done
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {attn.tasks.length > 0 && (
+                            <div>
+                              <div className="insp-section-title">
+                                <span>Open Tasks</span>
+                                <span className="nav-count">{attn.tasks.length}</span>
+                              </div>
+                              <div className="checklist">
+                                {attn.tasks.map((t, idx) => (
+                                  <div key={`tsk-${idx}`} className="check-row" style={{ alignItems: "flex-start" }}>
+                                    <span style={{ flex: 1, lineHeight: 1.4 }}>{cleanText(t)}</span>
+                                    <button
+                                      className="btn btn-xs"
+                                      onClick={() =>
+                                        void saveStatusUpdate(selectedProject, {
+                                          blockers: selectedProject.status.blockers.filter((x) => x !== t),
+                                        })
+                                      }
+                                    >
+                                      Done
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()}
 
                     {selectedProject.github && selectedProject.github.openPrs.length > 0 && (
                       <div>

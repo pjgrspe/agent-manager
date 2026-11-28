@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   buildAutoRecapStatus,
+  classifyAttentionItems,
   computeGroundTruth,
   extractVerifyCommand,
   isProjectBlocked,
@@ -85,6 +86,21 @@ describe("statusParser", () => {
     assert.deepEqual(next.plan, existing.plan);
     assert.equal(next.recap[0], "WIP on main: 2 uncommitted file(s)");
     assert.equal(next.recap[1], "[2026-11-27] Add auth guard (abc1234)");
+  });
+
+  it("distinguishes true blockers from open decisions and routine tasks", () => {
+    const res = classifyAttentionItems([
+      "Phone in use by someone else: screen capture waits on it",
+      "Decide: 05 F14a says slave ignores untrusted Master clock. Spec or code?",
+      "Hours tracker in the Dev-Log is empty (budget 260 h)",
+      "Device tests still pending: MOB-01 token refresh",
+    ]);
+    assert.deepEqual(res.blockers, ["Phone in use by someone else: screen capture waits on it"]);
+    assert.deepEqual(res.decisions, ["Decide: 05 F14a says slave ignores untrusted Master clock. Spec or code?"]);
+    assert.deepEqual(res.tasks, [
+      "Hours tracker in the Dev-Log is empty (budget 260 h)",
+      "Device tests still pending: MOB-01 token refresh",
+    ]);
   });
 
   it("matches Blocked filter when a project has blockers even if state is Active", () => {

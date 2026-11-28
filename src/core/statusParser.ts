@@ -174,8 +174,40 @@ export function buildAutoRecapStatus(
   };
 }
 
+export interface ClassifiedAttention {
+  blockers: string[];
+  decisions: string[];
+  tasks: string[];
+}
+
+const HARD_BLOCKER_RE =
+  /\b(block(?:ed|er)?|stuck|broken|fail(?:ed|ing)|cannot|can't|stopped|skipped until|waits?\s+on|waiting on\b(?!.*\breview\b)|need(?:s)?\s+(?:api|db|prod|staging|access|credentials))\b/i;
+const DECISION_RE =
+  /(\?|\b(decide|decision|your ok|ok needed|confirm|approve|approval|spec or code|scope|priority|acceptable|which)\b)/i;
+
+export function classifyAttentionItems(items: string[]): ClassifiedAttention {
+  const blockers: string[] = [];
+  const decisions: string[] = [];
+  const tasks: string[] = [];
+
+  for (const raw of items) {
+    const item = raw.trim();
+    if (!item) continue;
+    if (DECISION_RE.test(item)) {
+      decisions.push(item);
+    } else if (HARD_BLOCKER_RE.test(item)) {
+      blockers.push(item);
+    } else {
+      tasks.push(item);
+    }
+  }
+
+  return { blockers, decisions, tasks };
+}
+
 export function isProjectBlocked(project: Pick<ManagedProject, "status">): boolean {
-  return project.status.state === "Blocked" || project.status.blockers.length > 0;
+  const { blockers } = classifyAttentionItems(project.status.blockers);
+  return project.status.state === "Blocked" || blockers.length > 0;
 }
 
 export function matchesStateFilter(
@@ -245,13 +277,16 @@ export function computeGroundTruth(input: {
 
   // 2. Deterministic State Derivation (Trust Pyramid order)
   const openPrs = github?.openPrs ?? [];
-  const failingPr = openPrs.find((pr) => pr.ciStatus === "Fail");
+  const failingPr = openPrs.find(
+    (pr) => pr.ciStatus === "Fail" || pr.reviewState === "Changes Requested",
+  );
   const reviewPr = openPrs.find((pr) => !pr.isDraft);
+  const classified = classifyAttentionItems(status.blockers);
 
-  if (status.blockers.length > 0) {
+  if (classified.blockers.length > 0) {
     return {
       state: "Blocked",
-      reason: `Pinned blocker: ${status.blockers[0]}`,
+      reason: classified.blockers[0]!,
       source: "manual",
       verifyHealth,
       verifySha,
@@ -263,9 +298,12 @@ export function computeGroundTruth(input: {
   if (failingPr) {
     return {
       state: "Blocked",
-      reason: `CI failing on PR #${failingPr.number}: ${failingPr.title}`,
+      reason:
+        failingPr.reviewState === "Changes Requested"
+          ? `Changes requested on PR #${failingPr.number}: ${failingPr.title}`
+          : `CI failing on PR #${failingPr.number}: ${failingPr.title}`,
       source: "github",
-      verifyHealth: "Fail",
+      verifyHealth: failingPr.ciStatus === "Fail" ? "Fail" : verifyHealth,
       verifySha,
       verifyAt,
       statusFileStale,
@@ -285,11 +323,25 @@ export function computeGroundTruth(input: {
   }
 
   if (reviewPr) {
-    const ciLabel = reviewPr.ciStatus !== "None" ? ` · CI ${reviewPr.ciStatus}` : "";
+    const isApproved = reviewPr.reviewState === "Approved";
     return {
       state: "Waiting on Review",
-      reason: `PR #${reviewPr.number} open${ciLabel}`,
+      reason: isApproved
+        ? `PR #${reviewPr.number} approved — ready to merge: ${reviewPr.title}`
+        : `PR #${reviewPr.number} waiting for review: ${reviewPr.title}`,
       source: "github",
+      verifyHealth,
+      verifySha,
+      verifyAt,
+      statusFileStale,
+    };
+  }
+
+  if (classified.decisions.length > 0) {
+    return {
+      state: "Waiting on Review",
+      reason: classified.decisions[0]!,
+      source: "manual",
       verifyHealth,
       verifySha,
       verifyAt,

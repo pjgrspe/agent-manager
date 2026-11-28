@@ -43,6 +43,7 @@ describe("discoverReposInFolder", () => {
       assert.equal(agentsContent, "# Existing Custom Rules\n");
       const learnings = await fs.readFile(path.join(tmp, ".agents", "project-learnings.md"), "utf8");
       assert.ok(learnings.includes("npm run lint && npm test && npm run build"));
+      await assert.rejects(fs.access(path.join(tmp, ".agents", "status.md")));
     } finally {
       await fs.rm(tmp, { recursive: true, force: true });
     }

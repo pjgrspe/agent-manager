@@ -799,7 +799,7 @@ export function App() {
                                 const latestRecap =
                                   project.status.recap[0] ??
                                   project.git.recentCommits[0]?.subject ??
-                                  "Click Sync Recap to pull latest Git activity";
+                                  "No recent activity yet";
 
                                 return (
                                   <div
@@ -899,7 +899,7 @@ export function App() {
                           const latestRecap =
                             project.status.recap[0] ??
                             project.git.recentCommits[0]?.subject ??
-                            "Click Sync Recap to pull latest Git activity";
+                            "No recent activity yet";
 
                           return (
                             <motion.article

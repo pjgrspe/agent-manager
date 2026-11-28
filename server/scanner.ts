@@ -767,19 +767,6 @@ export async function installBastionIntoRepo(
     installedFiles++;
   }
 
-  const statusDest = path.join(repoPath, ".agents", "status.md");
-  const statusTpl = path.join(
-    bastionSourceRoot,
-    ".agents",
-    "skills",
-    "bastion",
-    "references",
-    "status-template.md",
-  );
-  if (!(await pathExists(statusDest)) && (await pathExists(statusTpl))) {
-    if (await copyIfAllowed(statusTpl, statusDest, false)) installedFiles++;
-  }
-
   return { installedFiles, detectedVerifyCmd };
 }
 

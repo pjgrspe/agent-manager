@@ -197,7 +197,13 @@ const server = http.createServer(async (req, res) => {
       const scanned = await getProjectsFast(false);
       store.syncProjects(scanned);
       store.recordScheduledDigestsIfDue(scanned);
-      const history = store.listDigests(16);
+      let history = store.listDigests(16);
+      const latestDaily = history.find((d) => d.period === "daily");
+      if (!latestDaily?.brief && scanned.length > 0) {
+        store.saveDigest(buildPmDigest(scanned, "daily"));
+        store.saveDigest(buildPmDigest(scanned, "weekly"));
+        history = store.listDigests(16);
+      }
       sendJson(req, res, 200, {
         latestDaily: history.find((d) => d.period === "daily") ?? buildPmDigest(scanned, "daily"),
         latestWeekly: history.find((d) => d.period === "weekly") ?? buildPmDigest(scanned, "weekly"),

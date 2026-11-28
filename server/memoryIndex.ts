@@ -6,7 +6,10 @@ import type {
   MemoryIndexStats,
   MemorySearchHit,
   MemorySourceKind,
+  PmDigestBrief,
   PmDigestEntry,
+  PmDigestItem,
+  PmSuggestion,
 } from "../src/core/types.ts";
 
 interface DocRecord {
@@ -228,6 +231,7 @@ export class CitadelMemoryStore {
   }
 
   saveDigest(entry: PmDigestEntry): PmDigestEntry {
+    const payload = JSON.stringify({ stats: entry.stats, brief: entry.brief });
     const res = this.db
       .prepare(
         `INSERT INTO digests (period, created_at, headline, stats_json, markdown)
@@ -237,7 +241,7 @@ export class CitadelMemoryStore {
         entry.period,
         entry.createdAt,
         entry.headline,
-        JSON.stringify(entry.stats),
+        payload,
         entry.markdown,
       );
     return { ...entry, id: Number(res.lastInsertRowid) };
@@ -253,14 +257,21 @@ export class CitadelMemoryStore {
       )
       .all(limit) as Array<Record<string, unknown>>;
 
-    return rows.map((r) => ({
-      id: Number(r.id),
-      period: (r.period === "weekly" ? "weekly" : "daily") as "daily" | "weekly",
-      createdAt: String(r.created_at),
-      headline: String(r.headline),
-      stats: JSON.parse(String(r.stats_json)) as PmDigestEntry["stats"],
-      markdown: String(r.markdown),
-    }));
+    return rows.map((r) => {
+      const parsed = JSON.parse(String(r.stats_json)) as
+        | { stats: PmDigestEntry["stats"]; brief?: PmDigestBrief }
+        | PmDigestEntry["stats"];
+      const hasEnvelope = "stats" in parsed && typeof parsed.stats === "object";
+      return {
+        id: Number(r.id),
+        period: (r.period === "weekly" ? "weekly" : "daily") as "daily" | "weekly",
+        createdAt: String(r.created_at),
+        headline: String(r.headline),
+        stats: hasEnvelope ? parsed.stats : (parsed as PmDigestEntry["stats"]),
+        brief: hasEnvelope ? parsed.brief : undefined,
+        markdown: String(r.markdown),
+      };
+    });
   }
 
   recordScheduledDigestsIfDue(projects: ManagedProject[]): void {
@@ -444,13 +455,22 @@ export function buildPmDigest(
   const attentionLines: string[] = [];
   const agentLines: string[] = [];
 
+  const suggestions: PmSuggestion[] = [];
+  const shipped: PmDigestItem[] = [];
+  const needsAttention: PmDigestItem[] = [];
+  const plannedWork: PmDigestItem[] = [];
+  const agentUpdates: PmDigestItem[] = [];
+
   for (const p of projects) {
+    const repoUrl = p.githubRepo ? `https://github.com/${p.githubRepo}` : null;
     const recentCommits = p.git.recentCommits.filter((c) => c.date >= cutoffDate);
     const recentMerged = (p.github?.mergedPrs ?? []).filter(
       (pr) => pr.mergedAt.slice(0, 10) >= cutoffDate,
     );
     const openPrs = p.github?.openPrs ?? [];
     const openIssues = p.github?.openIssues ?? [];
+    const openMilestones = p.github?.milestones ?? [];
+    const nextPlanItems = p.status.plan.filter((item) => !item.done);
 
     commitsCount += recentCommits.length;
     mergedPrsCount += recentMerged.length;
@@ -459,52 +479,187 @@ export function buildPmDigest(
 
     if (p.status.state === "Blocked" || p.status.blockers.length > 0) {
       blockedCount += 1;
-      attentionLines.push(
-        `- **${p.name}** (Blocked): ${p.status.blockers[0] ?? p.truth.reason}`,
-      );
+      const reason = p.status.blockers[0] ?? p.truth.reason;
+      attentionLines.push(`- **${p.name}** (Needs decision): ${reason}`);
+      needsAttention.push({
+        projectId: p.id,
+        projectName: p.name,
+        group: p.group,
+        summary: reason,
+        detail: "Needs your decision",
+        url: repoUrl,
+      });
+      suggestions.push({
+        priority: "high",
+        projectId: p.id,
+        projectName: p.name,
+        action: `Unblock ${p.name}`,
+        reason,
+      });
     } else if (openPrs.length > 0) {
+      const topPr = openPrs[0]!;
       attentionLines.push(
-        `- **${p.name}** (${openPrs.length} open PR${openPrs.length > 1 ? "s" : ""}): #${openPrs[0]!.number} ${openPrs[0]!.title}`,
+        `- **${p.name}** (${openPrs.length} open PR${openPrs.length > 1 ? "s" : ""}): #${topPr.number} ${topPr.title}`,
       );
+      needsAttention.push({
+        projectId: p.id,
+        projectName: p.name,
+        group: p.group,
+        summary: `PR #${topPr.number}: ${topPr.title}`,
+        detail:
+          openPrs.length > 1
+            ? `${openPrs.length} pull requests waiting for review`
+            : "Waiting for review",
+        url: topPr.url,
+      });
+      suggestions.push({
+        priority: topPr.ciStatus === "Fail" ? "high" : "medium",
+        projectId: p.id,
+        projectName: p.name,
+        action:
+          topPr.ciStatus === "Fail"
+            ? `Check failing checks on ${p.name} PR #${topPr.number}`
+            : `Review ${openPrs.length} open PR${openPrs.length > 1 ? "s" : ""} in ${p.name}`,
+        reason: topPr.title,
+      });
     }
 
     if (recentMerged.length > 0) {
       shippedLines.push(
         `- **${p.name}**: ${recentMerged.map((m) => `PR #${m.number} ${m.title}`).join("; ")}`,
       );
+      for (const m of recentMerged.slice(0, 3)) {
+        shipped.push({
+          projectId: p.id,
+          projectName: p.name,
+          group: p.group,
+          summary: m.title,
+          detail: `Merged PR #${m.number} · ${m.mergedAt.slice(0, 10)}`,
+          url: m.url,
+        });
+      }
     } else if (recentCommits.length > 0) {
       shippedLines.push(
-        `- **${p.name}** (${recentCommits.length} commit${recentCommits.length > 1 ? "s" : ""}): ${recentCommits[0]!.subject}`,
+        `- **${p.name}** (${recentCommits.length} update${recentCommits.length > 1 ? "s" : ""}): ${recentCommits[0]!.subject}`,
       );
+      shipped.push({
+        projectId: p.id,
+        projectName: p.name,
+        group: p.group,
+        summary: recentCommits[0]!.subject,
+        detail: `${recentCommits.length} update${recentCommits.length > 1 ? "s" : ""} in this period`,
+        url: repoUrl ? `${repoUrl}/commit/${recentCommits[0]!.hash}` : null,
+      });
+    }
+
+    if (openMilestones.length > 0) {
+      const m = openMilestones[0]!;
+      const total = m.openIssues + m.closedIssues;
+      const pct = total > 0 ? Math.round((m.closedIssues / total) * 100) : 0;
+      plannedWork.push({
+        projectId: p.id,
+        projectName: p.name,
+        group: p.group,
+        summary: m.title,
+        detail: `${m.closedIssues}/${total} done (${pct}%)${m.dueOn ? ` · Due ${m.dueOn.slice(0, 10)}` : ""}`,
+        url: m.url,
+      });
+    } else if (nextPlanItems.length > 0) {
+      plannedWork.push({
+        projectId: p.id,
+        projectName: p.name,
+        group: p.group,
+        summary: nextPlanItems[0]!.text,
+        detail:
+          nextPlanItems.length > 1
+            ? `+ ${nextPlanItems.length - 1} more planned goal${nextPlanItems.length > 2 ? "s" : ""}`
+            : "Next planned goal",
+        url: repoUrl,
+      });
+    } else if (openIssues.length > 0) {
+      plannedWork.push({
+        projectId: p.id,
+        projectName: p.name,
+        group: p.group,
+        summary: `#${openIssues[0]!.number} ${openIssues[0]!.title}`,
+        detail: `${openIssues.length} open GitHub issue${openIssues.length > 1 ? "s" : ""}`,
+        url: openIssues[0]!.url,
+      });
     }
 
     if (p.agentSessions.length > 0) {
       activeAgentsCount += p.agentSessions.length;
       for (const s of p.agentSessions) {
         const nextTask = s.tasks.find((t) => !t.done)?.text;
-        agentLines.push(
-          `- **${p.name}** (${s.agent}): ${nextTask ?? s.summary}`,
-        );
+        const summary = nextTask ?? s.summary;
+        agentLines.push(`- **${p.name}** (${s.agent}): ${summary}`);
+        agentUpdates.push({
+          projectId: p.id,
+          projectName: p.name,
+          group: p.group,
+          summary,
+          detail: `${s.agent}${s.lastActiveAt ? ` · ${s.lastActiveAt.slice(0, 10)}` : ""}`,
+          url: null,
+        });
       }
     }
   }
 
+  if (suggestions.length === 0 && plannedWork.length > 0) {
+    const first = plannedWork[0]!;
+    suggestions.push({
+      priority: "info",
+      projectId: first.projectId,
+      projectName: first.projectName,
+      action: `Focus next on ${first.projectName}`,
+      reason: first.summary,
+    });
+  }
+
+  suggestions.sort((a, b) => {
+    const rank = { high: 0, medium: 1, info: 2 };
+    return rank[a.priority] - rank[b.priority];
+  });
+
   const label = period === "daily" ? "Daily" : "Weekly";
-  const headline = `${label} PM Digest — ${mergedPrsCount} PRs merged, ${commitsCount} commits, ${blockedCount} blocked`;
+  const headline =
+    blockedCount > 0
+      ? `${blockedCount} decision${blockedCount > 1 ? "s" : ""} needed · ${mergedPrsCount} PRs shipped · ${commitsCount} updates`
+      : openPrsCount > 0
+        ? `${openPrsCount} PR${openPrsCount > 1 ? "s" : ""} ready for review · ${mergedPrsCount} shipped · ${commitsCount} updates`
+        : `${mergedPrsCount} PRs shipped · ${commitsCount} updates across ${projects.length} projects`;
+
+  const brief: PmDigestBrief = {
+    suggestions: suggestions.slice(0, 5),
+    shipped: shipped.slice(0, 8),
+    needsAttention: needsAttention.slice(0, 8),
+    plannedWork: plannedWork.slice(0, 8),
+    agentUpdates: agentUpdates.slice(0, 6),
+  };
 
   const md: string[] = [
-    `# Citadel ${label} PM Digest — ${now.toISOString().slice(0, 10)}`,
+    `# ${label} Project Briefing — ${now.toISOString().slice(0, 10)}`,
     "",
-    `> Window: last ${windowDays} day${windowDays > 1 ? "s" : ""} · ${projects.length} tracked repos · ${commitsCount} commits · ${mergedPrsCount} merged PRs · ${openPrsCount} open PRs · ${openIssuesCount} open issues`,
+    `> Last ${windowDays} day${windowDays > 1 ? "s" : ""} · ${projects.length} projects · ${mergedPrsCount} PRs shipped · ${openPrsCount} waiting for review · ${blockedCount} needing decisions`,
+    "",
+    "## Suggested Next Actions",
+    ...(suggestions.length > 0
+      ? suggestions.slice(0, 5).map((s) => `- **${s.action}**: ${s.reason}`)
+      : ["- All projects look on track right now."]),
     "",
     "## Shipped Recently",
-    ...(shippedLines.length > 0 ? shippedLines : ["- _(no new commits or merged PRs in this window)_"]),
+    ...(shippedLines.length > 0 ? shippedLines : ["- No new updates in this window."]),
     "",
-    "## Needs Attention / Open Reviews",
-    ...(attentionLines.length > 0 ? attentionLines : ["- _(all clear — zero blockers or pending PR reviews)_"]),
+    "## Needs Attention / Waiting for Review",
+    ...(attentionLines.length > 0 ? attentionLines : ["- All clear — no blockers or pending reviews."]),
     "",
-    "## Passive Agent Activity",
-    ...(agentLines.length > 0 ? agentLines : ["- _(no recent passive agent sessions detected)_"]),
+    "## Where Projects Are Heading (Planned Work)",
+    ...(plannedWork.length > 0
+      ? plannedWork.slice(0, 6).map((w) => `- **${w.projectName}**: ${w.summary}${w.detail ? ` (${w.detail})` : ""}`)
+      : ["- No upcoming milestones recorded yet."]),
+    "",
+    "## Agent Activity",
+    ...(agentLines.length > 0 ? agentLines : ["- No recent agent sessions detected."]),
   ];
 
   return {
@@ -519,6 +674,7 @@ export function buildPmDigest(
       blockedCount,
       activeAgentsCount,
     },
+    brief,
     markdown: md.join("\n"),
   };
 }

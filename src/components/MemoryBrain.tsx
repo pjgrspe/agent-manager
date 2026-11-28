@@ -2,16 +2,20 @@ import { useCallback, useEffect, useState } from "react";
 import { motion } from "motion/react";
 import {
   AlertTriangle,
+  ArrowUpRight,
   Bot,
   Brain,
   Calendar,
   Check,
+  CheckCircle2,
   CircleDot,
+  Compass,
   Copy,
   ExternalLink,
   GitCommitHorizontal,
   GitMerge,
   GitPullRequest,
+  Lightbulb,
   RefreshCw,
   Search,
   Sparkles,
@@ -60,7 +64,7 @@ function sourceBadge(source: MemorySourceKind) {
 }
 
 export function MemoryBrain({ onSelectProject }: MemoryBrainProps) {
-  const [tab, setTab] = useState<"search" | "digests">("search");
+  const [tab, setTab] = useState<"search" | "digests">("digests");
   const [query, setQuery] = useState("");
   const [source, setSource] = useState<"" | MemorySourceKind>("");
   const [hits, setHits] = useState<MemorySearchHit[]>([]);
@@ -71,6 +75,7 @@ export function MemoryBrain({ onSelectProject }: MemoryBrainProps) {
   const [activeDigest, setActiveDigest] = useState<PmDigestEntry | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
+  const [showRawText, setShowRawText] = useState(false);
 
   const runSearch = useCallback(async (q: string, src: string) => {
     setLoading(true);
@@ -292,67 +297,280 @@ export function MemoryBrain({ onSelectProject }: MemoryBrainProps) {
             </div>
           </div>
 
-          <div className="bento-card" style={{ gap: 12 }}>
+          <div className="bento-card" style={{ gap: 16 }}>
             {activeDigest ? (
               <>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
                   <div>
-                    <div style={{ fontWeight: 650, fontSize: 14 }}>{activeDigest.headline}</div>
-                    <div style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
-                      Captured {new Date(activeDigest.createdAt).toLocaleString()}
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                      <span className={`pill-badge ${activeDigest.period === "weekly" ? "pill-review" : "pill-active"}`}>
+                        {activeDigest.period === "weekly" ? "Weekly Briefing" : "Daily Briefing"}
+                      </span>
+                      <span style={{ fontSize: 11.5, color: "var(--text-muted)" }}>
+                        {new Date(activeDigest.createdAt).toLocaleDateString(undefined, {
+                          weekday: "long",
+                          month: "short",
+                          day: "numeric",
+                          year: "numeric",
+                        })}
+                      </span>
+                    </div>
+                    <div style={{ fontWeight: 650, fontSize: 16, letterSpacing: "-0.015em" }}>
+                      {activeDigest.headline}
                     </div>
                   </div>
-                  <button
-                    className="btn btn-xs btn-primary"
-                    onClick={() => {
-                      void navigator.clipboard.writeText(activeDigest.markdown);
-                      setCopiedId(activeDigest.createdAt);
-                      window.setTimeout(() => setCopiedId(null), 2000);
-                    }}
-                  >
-                    {copiedId === activeDigest.createdAt ? (
-                      <>
-                        <Check size={12} /> Copied
-                      </>
-                    ) : (
-                      <>
-                        <Copy size={12} /> Copy Markdown
-                      </>
-                    )}
-                  </button>
+                  <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                    <button
+                      className="btn btn-xs"
+                      onClick={() => setShowRawText((v) => !v)}
+                    >
+                      {showRawText ? "Visual View" : "Raw Text"}
+                    </button>
+                    <button
+                      className="btn btn-xs btn-primary"
+                      onClick={() => {
+                        void navigator.clipboard.writeText(activeDigest.markdown);
+                        setCopiedId(activeDigest.createdAt);
+                        window.setTimeout(() => setCopiedId(null), 2000);
+                      }}
+                    >
+                      {copiedId === activeDigest.createdAt ? (
+                        <>
+                          <Check size={12} /> Copied
+                        </>
+                      ) : (
+                        <>
+                          <Copy size={12} /> Copy for Slack / Email
+                        </>
+                      )}
+                    </button>
+                  </div>
                 </div>
 
                 <div className="standup-stats">
                   <div className="standup-stat">
-                    <div className="standup-stat-num">{activeDigest.stats.commitsCount}</div>
-                    <div className="standup-stat-label">Commits</div>
-                  </div>
-                  <div className="standup-stat">
                     <div className="standup-stat-num" style={{ color: "var(--emerald)" }}>
                       {activeDigest.stats.mergedPrsCount}
                     </div>
-                    <div className="standup-stat-label">Merged PRs</div>
+                    <div className="standup-stat-label">Shipped PRs</div>
+                  </div>
+                  <div className="standup-stat">
+                    <div className="standup-stat-num">{activeDigest.stats.commitsCount}</div>
+                    <div className="standup-stat-label">Code Updates</div>
                   </div>
                   <div className="standup-stat">
                     <div className="standup-stat-num" style={{ color: "var(--amber)" }}>
                       {activeDigest.stats.openPrsCount}
                     </div>
-                    <div className="standup-stat-label">Open PRs</div>
+                    <div className="standup-stat-label">Ready for Review</div>
                   </div>
                   <div className="standup-stat">
                     <div className="standup-stat-num" style={{ color: "var(--rose)" }}>
                       {activeDigest.stats.blockedCount}
                     </div>
-                    <div className="standup-stat-label">Blocked</div>
+                    <div className="standup-stat-label">Needs Decision</div>
                   </div>
                 </div>
 
-                <pre className="standup-code" style={{ maxHeight: 420 }}>
-                  {activeDigest.markdown}
-                </pre>
+                {showRawText || !activeDigest.brief ? (
+                  <pre className="standup-code" style={{ maxHeight: 460 }}>
+                    {activeDigest.markdown}
+                  </pre>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                    {/* Suggested Next Actions */}
+                    <div className="standup-section sec-review">
+                      <div className="standup-sec-title">
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
+                          <Lightbulb size={14} color="#fbbf24" />
+                          Suggested Next Actions
+                        </span>
+                        <span className="nav-count">{activeDigest.brief.suggestions.length}</span>
+                      </div>
+                      {activeDigest.brief.suggestions.length === 0 ? (
+                        <div className="bento-empty" style={{ padding: "8px 4px" }}>
+                          <CheckCircle2 size={15} color="#34d399" />
+                          <span>All projects look on track — no urgent actions needed.</span>
+                        </div>
+                      ) : (
+                        activeDigest.brief.suggestions.map((s, idx) => (
+                          <button
+                            key={`${s.projectId}-${idx}`}
+                            className="standup-item"
+                            onClick={() => onSelectProject(s.projectId)}
+                          >
+                            <div style={{ minWidth: 0, textAlign: "left" }}>
+                              <div className="standup-item-name">
+                                <span
+                                  className={`pill-badge ${
+                                    s.priority === "high"
+                                      ? "pill-blocked"
+                                      : s.priority === "medium"
+                                        ? "pill-review"
+                                        : "pill-active"
+                                  }`}
+                                >
+                                  {s.priority === "high" ? "Priority" : s.priority === "medium" ? "Review" : "Next"}
+                                </span>
+                                <span>{s.action}</span>
+                              </div>
+                              <div className="standup-item-meta">{s.reason}</div>
+                            </div>
+                            <ArrowUpRight size={14} color="var(--text-muted)" />
+                          </button>
+                        ))
+                      )}
+                    </div>
+
+                    {/* Needs Attention / Decisions & Reviews */}
+                    {activeDigest.brief.needsAttention.length > 0 && (
+                      <div className="standup-section sec-blocked">
+                        <div className="standup-sec-title">
+                          <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
+                            <AlertTriangle size={14} color="#fb7185" />
+                            Needs Your Decision or Review
+                          </span>
+                          <span className="nav-count">{activeDigest.brief.needsAttention.length}</span>
+                        </div>
+                        {activeDigest.brief.needsAttention.map((item, idx) => (
+                          <button
+                            key={`${item.projectId}-att-${idx}`}
+                            className="standup-item"
+                            onClick={() => onSelectProject(item.projectId)}
+                          >
+                            <div style={{ minWidth: 0, textAlign: "left" }}>
+                              <div className="standup-item-name">
+                                <span>{item.projectName}</span>
+                                {item.group && <span className="mono-tag">{item.group}</span>}
+                              </div>
+                              <div className="standup-item-meta" style={{ color: "var(--text)" }}>
+                                {item.summary}
+                              </div>
+                              {item.detail && <div className="standup-item-meta">{item.detail}</div>}
+                            </div>
+                            {item.url && (
+                              <a
+                                className="btn btn-ghost btn-xs"
+                                href={item.url}
+                                target="_blank"
+                                rel="noreferrer"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <ExternalLink size={12} />
+                              </a>
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Where Projects Are Heading (Planned Work) */}
+                    {activeDigest.brief.plannedWork.length > 0 && (
+                      <div className="standup-section sec-active">
+                        <div className="standup-sec-title">
+                          <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
+                            <Compass size={14} color="#38bdf8" />
+                            Where Projects Are Heading (Planned Work)
+                          </span>
+                          <span className="nav-count">{activeDigest.brief.plannedWork.length}</span>
+                        </div>
+                        {activeDigest.brief.plannedWork.map((item, idx) => (
+                          <button
+                            key={`${item.projectId}-plan-${idx}`}
+                            className="standup-item"
+                            onClick={() => onSelectProject(item.projectId)}
+                          >
+                            <div style={{ minWidth: 0, textAlign: "left" }}>
+                              <div className="standup-item-name">
+                                <span>{item.projectName}</span>
+                                {item.group && <span className="mono-tag">{item.group}</span>}
+                              </div>
+                              <div className="standup-item-meta" style={{ color: "var(--text)" }}>
+                                {item.summary}
+                              </div>
+                              {item.detail && <div className="standup-item-meta">{item.detail}</div>}
+                            </div>
+                            <ArrowUpRight size={14} color="var(--text-muted)" />
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Shipped Recently */}
+                    {activeDigest.brief.shipped.length > 0 && (
+                      <div className="standup-section">
+                        <div className="standup-sec-title">
+                          <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
+                            <CheckCircle2 size={14} color="#34d399" />
+                            Shipped Recently
+                          </span>
+                          <span className="nav-count">{activeDigest.brief.shipped.length}</span>
+                        </div>
+                        {activeDigest.brief.shipped.map((item, idx) => (
+                          <button
+                            key={`${item.projectId}-ship-${idx}`}
+                            className="standup-item"
+                            onClick={() => onSelectProject(item.projectId)}
+                          >
+                            <div style={{ minWidth: 0, textAlign: "left" }}>
+                              <div className="standup-item-name">
+                                <span>{item.projectName}</span>
+                                {item.group && <span className="mono-tag">{item.group}</span>}
+                              </div>
+                              <div className="standup-item-meta" style={{ color: "var(--text)" }}>
+                                {item.summary}
+                              </div>
+                              {item.detail && <div className="standup-item-meta">{item.detail}</div>}
+                            </div>
+                            {item.url && (
+                              <a
+                                className="btn btn-ghost btn-xs"
+                                href={item.url}
+                                target="_blank"
+                                rel="noreferrer"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <ExternalLink size={12} />
+                              </a>
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Active Agent / Team Updates */}
+                    {activeDigest.brief.agentUpdates.length > 0 && (
+                      <div className="standup-section">
+                        <div className="standup-sec-title">
+                          <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
+                            <Bot size={14} color="#a78bfa" />
+                            Agent Session Updates
+                          </span>
+                          <span className="nav-count">{activeDigest.brief.agentUpdates.length}</span>
+                        </div>
+                        {activeDigest.brief.agentUpdates.map((item, idx) => (
+                          <button
+                            key={`${item.projectId}-agent-${idx}`}
+                            className="standup-item"
+                            onClick={() => onSelectProject(item.projectId)}
+                          >
+                            <div style={{ minWidth: 0, textAlign: "left" }}>
+                              <div className="standup-item-name">
+                                <span>{item.projectName}</span>
+                                {item.detail && <span className="mono-tag">{item.detail}</span>}
+                              </div>
+                              <div className="standup-item-meta">{item.summary}</div>
+                            </div>
+                            <ArrowUpRight size={14} color="var(--text-muted)" />
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
               </>
             ) : (
-              <div className="empty-state">No digests recorded yet. Click "+ Daily" to capture one now.</div>
+              <div className="empty-state">No briefings recorded yet. Click "+ Daily" to generate one now.</div>
             )}
           </div>
         </div>

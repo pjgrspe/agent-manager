@@ -170,6 +170,31 @@ export interface MemoryIndexStats {
   lastIndexedAt: string | null;
 }
 
+export interface PmDigestItem {
+  projectId: string;
+  projectName: string;
+  group?: string;
+  summary: string;
+  detail?: string;
+  url?: string | null;
+}
+
+export interface PmSuggestion {
+  priority: "high" | "medium" | "info";
+  projectId: string;
+  projectName: string;
+  action: string;
+  reason: string;
+}
+
+export interface PmDigestBrief {
+  suggestions: PmSuggestion[];
+  shipped: PmDigestItem[];
+  needsAttention: PmDigestItem[];
+  plannedWork: PmDigestItem[];
+  agentUpdates: PmDigestItem[];
+}
+
 export interface PmDigestEntry {
   id?: number;
   period: "daily" | "weekly";
@@ -183,6 +208,7 @@ export interface PmDigestEntry {
     blockedCount: number;
     activeAgentsCount: number;
   };
+  brief?: PmDigestBrief;
   markdown: string;
 }
 

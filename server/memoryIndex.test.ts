@@ -139,12 +139,17 @@ describe("CitadelMemoryStore (SQLite FTS5 + Digests)", () => {
       assert.equal(digest.stats.commitsCount, 1);
       assert.equal(digest.stats.mergedPrsCount, 1);
       assert.equal(digest.stats.blockedCount, 1);
+      assert.ok(digest.brief);
+      assert.ok(digest.brief.suggestions.length >= 1);
+      assert.ok(digest.brief.plannedWork.length >= 1);
+      assert.ok(digest.brief.shipped.length >= 1);
       assert.ok(digest.markdown.includes("LoRA Firmware"));
 
       store.recordScheduledDigestsIfDue([sample]);
       store.recordScheduledDigestsIfDue([sample]); // should not duplicate
       const list = store.listDigests(10);
       assert.equal(list.length, 2); // 1 daily + 1 weekly
+      assert.ok(list[0]?.brief?.suggestions.length);
     } finally {
       store.close();
     }

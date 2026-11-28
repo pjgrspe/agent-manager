@@ -1,14 +1,18 @@
 import { useMemo, useState } from "react";
-import { motion } from "motion/react";
+import { AnimatePresence, motion } from "motion/react";
 import {
   Activity,
   AlertTriangle,
   ArrowUpRight,
   CheckCircle2,
+  Circle,
+  ExternalLink,
   FolderKanban,
   GitCommitHorizontal,
   GitMerge,
+  GitPullRequest,
   Target,
+  X,
 } from "lucide-react";
 import type { ManagedProject, ProjectState } from "../core/types.ts";
 
@@ -39,6 +43,46 @@ export function ControlCenter({
   onOpenStandup,
 }: ControlCenterProps) {
   const [hoveredDay, setHoveredDay] = useState<string | null>(null);
+  const [kpiModal, setKpiModal] = useState<"goals" | "shipped" | null>(null);
+
+  const allGoals = useMemo(() => {
+    const list: Array<{ projectId: string; projectName: string; text: string; done: boolean }> = [];
+    for (const p of projects) {
+      for (const item of p.status.plan) {
+        list.push({
+          projectId: p.id,
+          projectName: p.name,
+          text: item.text.replace(/`([^`]+)`/g, "$1"),
+          done: item.done,
+        });
+      }
+    }
+    return list;
+  }, [projects]);
+
+  const allShippedPrs = useMemo(() => {
+    const list: Array<{
+      projectId: string;
+      projectName: string;
+      number: number;
+      title: string;
+      mergedAt: string;
+      url: string;
+    }> = [];
+    for (const p of projects) {
+      for (const pr of p.github?.mergedPrs ?? []) {
+        list.push({
+          projectId: p.id,
+          projectName: p.name,
+          number: pr.number,
+          title: pr.title,
+          mergedAt: pr.mergedAt,
+          url: pr.url,
+        });
+      }
+    }
+    return list.sort((a, b) => b.mergedAt.localeCompare(a.mergedAt));
+  }, [projects]);
 
   const metrics = useMemo(() => {
     const total = projects.length;
@@ -197,11 +241,14 @@ export function ControlCenter({
           </div>
         </motion.button>
 
-        <motion.div
+        <motion.button
           className="bento-kpi"
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ ...SPRING, delay: 0.08 }}
+          whileHover={{ y: -2 }}
+          onClick={() => setKpiModal("goals")}
+          title="Click to see all planned goals across projects"
         >
           <div className="bento-kpi-top">
             <span className="bento-label">Goals Progress</span>
@@ -209,15 +256,18 @@ export function ControlCenter({
           </div>
           <div className="bento-big">{metrics.milestonePct}%</div>
           <div className="bento-sub">
-            {metrics.doneMilestones} of {metrics.totalMilestones} goals done
+            {metrics.doneMilestones} of {metrics.totalMilestones} goals done · View list
           </div>
-        </motion.div>
+        </motion.button>
 
-        <motion.div
+        <motion.button
           className="bento-kpi"
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ ...SPRING, delay: 0.12 }}
+          whileHover={{ y: -2 }}
+          onClick={() => setKpiModal("shipped")}
+          title="Click to see recently merged pull requests"
         >
           <div className="bento-kpi-top">
             <span className="bento-label">Recently Shipped</span>
@@ -227,9 +277,9 @@ export function ControlCenter({
             {metrics.mergedPrs}
           </div>
           <div className="bento-sub">
-            merged PRs · {metrics.openPrs} open
+            merged PRs · {metrics.openPrs} open · View list
           </div>
-        </motion.div>
+        </motion.button>
       </div>
 
       {/* Row 2: Charts */}
@@ -435,6 +485,107 @@ export function ControlCenter({
           )}
         </motion.div>
       </div>
+
+      {/* KPI Drill-Down Modal (Goals / Shipped PRs) */}
+      <AnimatePresence>
+        {kpiModal && (
+          <motion.div
+            className="modal-backdrop"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setKpiModal(null)}
+          >
+            <motion.div
+              className="modal-panel standup-modal"
+              initial={{ opacity: 0, scale: 0.96, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.96, y: 10 }}
+              transition={SPRING}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="inspector-header" style={{ padding: 0, borderBottom: "none", alignItems: "center" }}>
+                <div>
+                  <h2 style={{ margin: 0 }}>
+                    {kpiModal === "goals"
+                      ? `Planned Goals (${metrics.doneMilestones}/${metrics.totalMilestones} done)`
+                      : `Recently Shipped (${allShippedPrs.length} merged PRs)`}
+                  </h2>
+                  <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 2 }}>
+                    {kpiModal === "goals"
+                      ? "Click any goal to open its project"
+                      : "Merged pull requests across your tracked projects"}
+                  </div>
+                </div>
+                <button className="btn btn-ghost btn-xs" onClick={() => setKpiModal(null)}>
+                  <X size={15} />
+                </button>
+              </div>
+
+              <div className="checklist" style={{ maxHeight: 420, overflowY: "auto" }}>
+                {kpiModal === "goals" ? (
+                  allGoals.length === 0 ? (
+                    <div className="bento-empty">No planned goals tracked yet.</div>
+                  ) : (
+                    allGoals.map((g, idx) => (
+                      <button
+                        key={`${g.projectId}-${idx}`}
+                        className="standup-item"
+                        onClick={() => {
+                          onSelectProject(g.projectId);
+                          setKpiModal(null);
+                        }}
+                      >
+                        <div style={{ display: "flex", alignItems: "flex-start", gap: 9, minWidth: 0, textAlign: "left" }}>
+                          {g.done ? (
+                            <CheckCircle2 size={14} color="#34d399" style={{ marginTop: 2, flexShrink: 0 }} />
+                          ) : (
+                            <Circle size={14} color="#a78bfa" style={{ marginTop: 2, flexShrink: 0 }} />
+                          )}
+                          <div style={{ minWidth: 0 }}>
+                            <div className="standup-item-name">
+                              <span className="mono-tag">{g.projectName}</span>
+                              <span style={{ textDecoration: g.done ? "line-through" : "none", opacity: g.done ? 0.6 : 1 }}>
+                                {g.text}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                        <ArrowUpRight size={14} color="var(--text-muted)" />
+                      </button>
+                    ))
+                  )
+                ) : allShippedPrs.length === 0 ? (
+                  <div className="bento-empty">No recently merged pull requests found.</div>
+                ) : (
+                  allShippedPrs.map((pr) => (
+                    <a
+                      key={`${pr.projectId}-${pr.number}`}
+                      href={pr.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="standup-item"
+                      style={{ textDecoration: "none", color: "inherit" }}
+                    >
+                      <div style={{ display: "flex", alignItems: "flex-start", gap: 9, minWidth: 0, textAlign: "left" }}>
+                        <GitPullRequest size={14} color="#34d399" style={{ marginTop: 2, flexShrink: 0 }} />
+                        <div style={{ minWidth: 0 }}>
+                          <div className="standup-item-name">
+                            <span className="mono-tag">{pr.projectName}</span>
+                            <span>#{pr.number} {pr.title}</span>
+                          </div>
+                          <div className="standup-item-meta">Merged {pr.mergedAt.slice(0, 10)}</div>
+                        </div>
+                      </div>
+                      <ExternalLink size={13} color="var(--text-muted)" />
+                    </a>
+                  ))
+                )}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

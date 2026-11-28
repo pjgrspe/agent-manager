@@ -117,12 +117,12 @@ export function MemoryBrain({ onSelectProject }: MemoryBrainProps) {
         <div>
           <div className="hero-eyebrow">
             <Brain size={11} style={{ verticalAlign: "-1px", marginRight: 5 }} />
-            Local SQLite FTS5 Memory · 0 Tokens
+            Project History &amp; Digests
           </div>
           <p className="hero-headline">
             {stats
-              ? `${stats.totalDocs} indexed memories across your repos, GitHub & agent sessions`
-              : "Cross-project memory & scheduled PM digests"}
+              ? `${stats.totalDocs} saved updates across your projects, PRs & agent sessions`
+              : "Search past work or read daily & weekly summaries"}
           </p>
         </div>
 
@@ -132,14 +132,14 @@ export function MemoryBrain({ onSelectProject }: MemoryBrainProps) {
             onClick={() => setTab("search")}
           >
             {tab === "search" && <span className="seg-pill-bg" />}
-            <span className="seg-label">Memory Search</span>
+            <span className="seg-label">Search History</span>
           </button>
           <button
             className={`seg-option ${tab === "digests" ? "active" : ""}`}
             onClick={() => setTab("digests")}
           >
             {tab === "digests" && <span className="seg-pill-bg" />}
-            <span className="seg-label">PM Digests ({digests.length})</span>
+            <span className="seg-label">Digests ({digests.length})</span>
           </button>
         </div>
       </div>
@@ -182,7 +182,7 @@ export function MemoryBrain({ onSelectProject }: MemoryBrainProps) {
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {hits.length === 0 ? (
               <div className="empty-state">
-                {loading ? "Searching SQLite FTS5 memory..." : "No matching memories found."}
+                {loading ? "Searching project history..." : "No matching updates found."}
               </div>
             ) : (
               hits.map((hit) => {

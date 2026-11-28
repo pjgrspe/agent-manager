@@ -5,9 +5,9 @@ import {
   AlertTriangle,
   ArrowUpRight,
   CheckCircle2,
-  GitBranch,
+  FolderKanban,
   GitCommitHorizontal,
-  Shield,
+  GitMerge,
   Target,
 } from "lucide-react";
 import type { ManagedProject, ProjectState } from "../core/types.ts";
@@ -17,8 +17,6 @@ interface ControlCenterProps {
   onSelectProject: (id: string) => void;
   onJumpFilter: (filter: "All" | ProjectState) => void;
   onOpenStandup: () => void;
-  onSyncAll: () => void;
-  loading: boolean;
 }
 
 const SPRING = { type: "spring" as const, stiffness: 320, damping: 28 };
@@ -39,8 +37,6 @@ export function ControlCenter({
   onSelectProject,
   onJumpFilter,
   onOpenStandup,
-  onSyncAll,
-  loading,
 }: ControlCenterProps) {
   const [hoveredDay, setHoveredDay] = useState<string | null>(null);
 
@@ -50,9 +46,9 @@ export function ControlCenter({
     const review = projects.filter((p) => p.status.state === "Waiting on Review").length;
     const blocked = projects.filter((p) => p.status.state === "Blocked" || p.status.blockers.length > 0).length;
     const idle = projects.filter((p) => p.status.state === "Idle").length;
-    const dirtyRepos = projects.filter((p) => p.git.dirtyCount > 0).length;
-    const guarded = projects.filter((p) => p.antiSlop.hasSkill).length;
-    const verifyPass = projects.filter((p) => p.status.verify === "Pass").length;
+    const remoteCount = projects.filter((p) => p.sourceType === "remote").length;
+    const mergedPrs = projects.reduce((sum, p) => sum + (p.github?.mergedPrs.length ?? 0), 0);
+    const openPrs = projects.reduce((sum, p) => sum + (p.github?.openPrs.length ?? 0), 0);
 
     const totalMilestones = projects.reduce((sum, p) => sum + p.status.plan.length, 0);
     const doneMilestones = projects.reduce(
@@ -66,13 +62,12 @@ export function ControlCenter({
       review,
       blocked,
       idle,
-      dirtyRepos,
-      guarded,
-      verifyPass,
+      remoteCount,
+      mergedPrs,
+      openPrs,
       totalMilestones,
       doneMilestones,
       milestonePct: totalMilestones > 0 ? Math.round((doneMilestones / totalMilestones) * 100) : 0,
-      guardedPct: total > 0 ? Math.round((guarded / total) * 100) : 0,
     };
   }, [projects]);
 
@@ -172,14 +167,13 @@ export function ControlCenter({
           onClick={() => onJumpFilter("All")}
         >
           <div className="bento-kpi-top">
-            <span className="bento-label">Tracked Fleet</span>
-            <GitBranch size={14} color="#38bdf8" />
+            <span className="bento-label">Projects</span>
+            <FolderKanban size={14} color="#38bdf8" />
           </div>
           <div className="bento-big">{metrics.total}</div>
           <div className="bento-sub">
-            {metrics.dirtyRepos > 0
-              ? `${metrics.dirtyRepos} with uncommitted WIP`
-              : "All working trees clean"}
+            {metrics.active} in progress
+            {metrics.remoteCount > 0 ? ` · ${metrics.remoteCount} remote` : ""}
           </div>
         </motion.button>
 
@@ -210,12 +204,12 @@ export function ControlCenter({
           transition={{ ...SPRING, delay: 0.08 }}
         >
           <div className="bento-kpi-top">
-            <span className="bento-label">Milestone Progress</span>
+            <span className="bento-label">Goals Progress</span>
             <Target size={14} color="#a78bfa" />
           </div>
           <div className="bento-big">{metrics.milestonePct}%</div>
           <div className="bento-sub">
-            {metrics.doneMilestones} of {metrics.totalMilestones} milestones shipped
+            {metrics.doneMilestones} of {metrics.totalMilestones} goals done
           </div>
         </motion.div>
 
@@ -226,21 +220,21 @@ export function ControlCenter({
           transition={{ ...SPRING, delay: 0.12 }}
         >
           <div className="bento-kpi-top">
-            <span className="bento-label">Bastion &amp; Verify</span>
-            <Shield size={14} color="#34d399" />
+            <span className="bento-label">Recently Shipped</span>
+            <GitMerge size={14} color="#34d399" />
           </div>
           <div className="bento-big" style={{ color: "var(--emerald)" }}>
-            {metrics.guardedPct}%
+            {metrics.mergedPrs}
           </div>
           <div className="bento-sub">
-            {metrics.guarded} guarded · {metrics.verifyPass} verify pass
+            merged PRs · {metrics.openPrs} open
           </div>
         </motion.div>
       </div>
 
       {/* Row 2: Charts */}
       <div className="bento-charts-row">
-        {/* 14-Day Commit Activity Chart */}
+        {/* 14-Day Activity Chart */}
         <motion.div
           className="bento-card"
           initial={{ opacity: 0, y: 12 }}
@@ -250,20 +244,17 @@ export function ControlCenter({
           <div className="bento-card-header">
             <div>
               <div className="bento-card-title">
-                <Activity size={14} color="#38bdf8" /> 14-Day Commit Velocity
+                <Activity size={14} color="#38bdf8" /> 14-Day Project Activity
               </div>
               <div className="bento-card-sub">
                 {hoveredPoint
-                  ? `${hoveredPoint.day}: ${hoveredPoint.count} commit(s)`
-                  : `${commitSeries.totalCommits} commits across all tracked repositories`}
+                  ? `${hoveredPoint.day}: ${hoveredPoint.count} update(s)`
+                  : `${commitSeries.totalCommits} updates across your projects`}
               </div>
             </div>
             <div style={{ display: "flex", gap: 6 }}>
-              <button className="btn btn-xs" onClick={onSyncAll} disabled={loading}>
-                Sync Recaps
-              </button>
               <button className="btn btn-xs btn-primary" onClick={onOpenStandup}>
-                Standup
+                Daily Brief
               </button>
             </div>
           </div>
@@ -303,8 +294,8 @@ export function ControlCenter({
         >
           <div className="bento-card-header">
             <div>
-              <div className="bento-card-title">Fleet Status Mix</div>
-              <div className="bento-card-sub">Click any state to filter</div>
+              <div className="bento-card-title">Project Status</div>
+              <div className="bento-card-sub">Click any status to filter</div>
             </div>
           </div>
 
@@ -374,15 +365,15 @@ export function ControlCenter({
         >
           <div className="bento-card-header">
             <div>
-              <div className="bento-card-title">Priority Queue</div>
-              <div className="bento-card-sub">Blockers, reviews, and uncommitted work</div>
+              <div className="bento-card-title">Needs Attention</div>
+              <div className="bento-card-sub">Open decisions, reviews, and active work</div>
             </div>
           </div>
 
           {attentionQueue.length === 0 ? (
             <div className="bento-empty">
               <CheckCircle2 size={16} color="#34d399" />
-              <span>Zero blockers or pending reviews across your fleet.</span>
+              <span>All clear — no blockers or pending reviews.</span>
             </div>
           ) : (
             <div className="queue-list">
@@ -391,7 +382,7 @@ export function ControlCenter({
                   p.status.blockers[0] ??
                   (p.status.state === "Waiting on Review"
                     ? "Ready for your review"
-                    : `${p.git.dirtyCount} uncommitted file(s) on ${p.git.branch}`);
+                    : `${p.git.dirtyCount} file(s) currently in progress`);
                 return (
                   <button
                     key={p.id}
@@ -419,14 +410,14 @@ export function ControlCenter({
           <div className="bento-card-header">
             <div>
               <div className="bento-card-title">
-                <GitCommitHorizontal size={14} color="#34d399" /> Live Cross-Repo Activity
+                <GitCommitHorizontal size={14} color="#34d399" /> Recent Activity
               </div>
-              <div className="bento-card-sub">Most recent commits across all projects</div>
+              <div className="bento-card-sub">Latest updates across your projects</div>
             </div>
           </div>
 
           {liveFeed.length === 0 ? (
-            <div className="bento-empty">No Git commits detected yet.</div>
+            <div className="bento-empty">No recent activity yet.</div>
           ) : (
             <div className="feed-list">
               {liveFeed.map((item) => (

@@ -19,6 +19,18 @@ export async function fetchProjects(): Promise<ManagedProject[]> {
   return res.projects;
 }
 
+export async function addRemoteProject(
+  githubRepo: string,
+  name?: string,
+  group?: string,
+): Promise<ManagedProject[]> {
+  const res = await requestJson<{ projects: ManagedProject[] }>("/projects/remote", {
+    method: "POST",
+    body: JSON.stringify({ githubRepo, name, group }),
+  });
+  return res.projects;
+}
+
 export async function addProject(path: string, name?: string, group?: string): Promise<ManagedProject[]> {
   const res = await requestJson<{ projects: ManagedProject[] }>("/projects", {
     method: "POST",

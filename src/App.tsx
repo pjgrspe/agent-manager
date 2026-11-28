@@ -2,15 +2,20 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import {
   AlertTriangle,
+  Bot,
   Check,
   CheckCircle2,
   ChevronDown,
+  CircleDot,
   ClipboardList,
   Copy,
+  ExternalLink,
   FolderOpen,
   FolderPlus,
   GitBranch,
+  GitMerge,
   GitPullRequest,
+  Globe,
   LayoutDashboard,
   Layers,
   Play,
@@ -20,6 +25,7 @@ import {
   Shield,
   Sparkles,
   Square,
+  Target,
   Terminal,
   Trash2,
   X,
@@ -28,6 +34,7 @@ import { ControlCenter } from "./components/ControlCenter.tsx";
 import {
   addProject,
   addProjectsBatch,
+  addRemoteProject,
   autoRecapAll,
   autoRecapOne,
   buildAgentCommand,
@@ -157,7 +164,7 @@ export function App() {
   });
 
   const [showAddModal, setShowAddModal] = useState(false);
-  const [addMode, setAddMode] = useState<"single" | "scan">("scan");
+  const [addMode, setAddMode] = useState<"remote" | "scan" | "single">("remote");
   const [pathInput, setPathInput] = useState("");
   const [groupInput, setGroupInput] = useState("");
   const [activeGroup, setActiveGroup] = useState<string | null>(null);
@@ -349,7 +356,14 @@ export function App() {
     setError(null);
     const resolvedGroup = groupInput.trim() || undefined;
     try {
-      if (addMode === "single") {
+      if (addMode === "remote") {
+        const updated = await addRemoteProject(pathInput.trim(), undefined, resolvedGroup);
+        setProjects(updated);
+        showToast("GitHub repository tracked", resolvedGroup ? `Group: ${resolvedGroup}` : pathInput.trim());
+        setPathInput("");
+        setGroupInput("");
+        setShowAddModal(false);
+      } else if (addMode === "single") {
         const updated = await addProject(pathInput.trim(), undefined, resolvedGroup);
         setProjects(updated);
         showToast("Repository added", resolvedGroup ? `Group: ${resolvedGroup}` : pathInput.trim());
@@ -364,11 +378,11 @@ export function App() {
         setScanCandidates(candidates);
         setSelectedCandidates(new Set(candidates.filter((c) => !c.alreadyTracked).map((c) => c.path)));
         if (candidates.length === 0) {
-          showToast("No Git repos found in folder", "Switch to 'Single Repo Path' to add a non-git folder");
+          showToast("No Git repos found in folder", "Switch to 'Local Path' to add a non-git folder");
         }
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to scan folder");
+      setError(e instanceof Error ? e.message : "Failed to add repository");
     }
   }
 
@@ -991,8 +1005,13 @@ export function App() {
                                     <div style={{ minWidth: 0 }}>
                                       <div className="row-top">
                                         <span className="row-name">{project.name}</span>
+                                        {project.sourceType === "remote" && (
+                                          <span className="pill-badge pill-active">
+                                            <Globe size={10} /> Remote
+                                          </span>
+                                        )}
                                         <span className={meta.pill}>{project.status.state}</span>
-                                        {project.git.isGitRepo && (
+                                        {project.git.isGitRepo && project.sourceType !== "remote" && (
                                           <span className={`mono-tag ${project.git.dirtyCount > 0 || project.git.ahead > 0 ? "dirty" : ""}`}>
                                             <GitBranch size={11} />
                                             {project.git.branch}
@@ -1014,6 +1033,16 @@ export function App() {
                                               : ""}
                                           </span>
                                         )}
+                                        {project.github && project.github.openIssues.length > 0 && (
+                                          <span className="mono-tag">
+                                            <CircleDot size={10} color="#38bdf8" /> {project.github.openIssues.length} issues
+                                          </span>
+                                        )}
+                                        {project.agentSessions.map((sess) => (
+                                          <span key={sess.agent} className="mono-tag" title={`Passive ${sess.agent} session`}>
+                                            <Bot size={10} color="#a78bfa" /> {sess.agent}
+                                          </span>
+                                        ))}
                                         {project.truth.verifyHealth === "Pass" && (
                                           <span className="pill-badge pill-pass">Verify Pass</span>
                                         )}
@@ -1053,20 +1082,36 @@ export function App() {
                                       </div>
                                     </div>
                                     <div className="row-actions" onClick={(e) => e.stopPropagation()}>
-                                      <motion.button
-                                        whileTap={{ scale: 0.96 }}
-                                        className="btn btn-xs btn-primary"
-                                        onClick={() => void handleCopyCmd(project)}
-                                      >
-                                        <Terminal size={11} /> Copy {activeAgentObj.label}
-                                      </motion.button>
-                                      <motion.button
-                                        whileTap={{ scale: 0.96 }}
-                                        className="btn btn-xs"
-                                        onClick={() => void handleAutoRecapOne(project)}
-                                      >
-                                        <RefreshCw size={11} /> Sync Recap
-                                      </motion.button>
+                                      {project.sourceType === "remote" ? (
+                                        project.githubRepo && (
+                                          <a
+                                            className="btn btn-xs btn-primary"
+                                            href={`https://github.com/${project.githubRepo}`}
+                                            target="_blank"
+                                            rel="noreferrer"
+                                            style={{ textDecoration: "none" }}
+                                          >
+                                            <ExternalLink size={11} /> GitHub
+                                          </a>
+                                        )
+                                      ) : (
+                                        <>
+                                          <motion.button
+                                            whileTap={{ scale: 0.96 }}
+                                            className="btn btn-xs btn-primary"
+                                            onClick={() => void handleCopyCmd(project)}
+                                          >
+                                            <Terminal size={11} /> Copy {activeAgentObj.label}
+                                          </motion.button>
+                                          <motion.button
+                                            whileTap={{ scale: 0.96 }}
+                                            className="btn btn-xs"
+                                            onClick={() => void handleAutoRecapOne(project)}
+                                          >
+                                            <RefreshCw size={11} /> Sync Recap
+                                          </motion.button>
+                                        </>
+                                      )}
                                     </div>
                                   </div>
                                 );
@@ -1120,9 +1165,14 @@ export function App() {
                               <div style={{ minWidth: 0 }}>
                                 <div className="row-top">
                                   <span className="row-name">{project.name}</span>
+                                  {project.sourceType === "remote" && (
+                                    <span className="pill-badge pill-active">
+                                      <Globe size={10} /> Remote
+                                    </span>
+                                  )}
                                   {project.group && <span className="mono-tag">{project.group}</span>}
                                   <span className={meta.pill}>{project.status.state}</span>
-                                  {project.git.isGitRepo && (
+                                  {project.git.isGitRepo && project.sourceType !== "remote" && (
                                     <span className={`mono-tag ${project.git.dirtyCount > 0 || project.git.ahead > 0 ? "dirty" : ""}`}>
                                       <GitBranch size={11} />
                                       {project.git.branch}
@@ -1144,6 +1194,16 @@ export function App() {
                                         : ""}
                                     </span>
                                   )}
+                                  {project.github && project.github.openIssues.length > 0 && (
+                                    <span className="mono-tag">
+                                      <CircleDot size={10} color="#38bdf8" /> {project.github.openIssues.length} issues
+                                    </span>
+                                  )}
+                                  {project.agentSessions.map((sess) => (
+                                    <span key={sess.agent} className="mono-tag" title={`Passive ${sess.agent} session`}>
+                                      <Bot size={10} color="#a78bfa" /> {sess.agent}
+                                    </span>
+                                  ))}
                                   {project.truth.verifyHealth === "Pass" && (
                                     <span className="pill-badge pill-pass">Verify Pass</span>
                                   )}
@@ -1185,20 +1245,36 @@ export function App() {
                               </div>
 
                               <div className="row-actions" onClick={(e) => e.stopPropagation()}>
-                                <motion.button
-                                  whileTap={{ scale: 0.96 }}
-                                  className="btn btn-xs btn-primary"
-                                  onClick={() => void handleCopyCmd(project)}
-                                >
-                                  <Terminal size={11} /> Copy {activeAgentObj.label}
-                                </motion.button>
-                                <motion.button
-                                  whileTap={{ scale: 0.96 }}
-                                  className="btn btn-xs"
-                                  onClick={() => void handleAutoRecapOne(project)}
-                                >
-                                  <RefreshCw size={11} /> Sync Recap
-                                </motion.button>
+                                {project.sourceType === "remote" ? (
+                                  project.githubRepo && (
+                                    <a
+                                      className="btn btn-xs btn-primary"
+                                      href={`https://github.com/${project.githubRepo}`}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      style={{ textDecoration: "none" }}
+                                    >
+                                      <ExternalLink size={11} /> GitHub
+                                    </a>
+                                  )
+                                ) : (
+                                  <>
+                                    <motion.button
+                                      whileTap={{ scale: 0.96 }}
+                                      className="btn btn-xs btn-primary"
+                                      onClick={() => void handleCopyCmd(project)}
+                                    >
+                                      <Terminal size={11} /> Copy {activeAgentObj.label}
+                                    </motion.button>
+                                    <motion.button
+                                      whileTap={{ scale: 0.96 }}
+                                      className="btn btn-xs"
+                                      onClick={() => void handleAutoRecapOne(project)}
+                                    >
+                                      <RefreshCw size={11} /> Sync Recap
+                                    </motion.button>
+                                  </>
+                                )}
                               </div>
                             </motion.article>
                           );
@@ -1227,10 +1303,28 @@ export function App() {
             >
               <div className="inspector-header">
                 <div style={{ minWidth: 0 }}>
-                  <h2>{selectedProject.name}</h2>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <h2>{selectedProject.name}</h2>
+                    {selectedProject.sourceType === "remote" && (
+                      <span className="pill-badge pill-active">
+                        <Globe size={10} /> Remote
+                      </span>
+                    )}
+                  </div>
                   <div className="inspector-path">{selectedProject.path}</div>
                 </div>
                 <div style={{ display: "flex", gap: 4 }}>
+                  {selectedProject.githubRepo && (
+                    <a
+                      className="btn btn-ghost btn-xs"
+                      href={`https://github.com/${selectedProject.githubRepo}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      title={`Open ${selectedProject.githubRepo} on GitHub`}
+                    >
+                      <ExternalLink size={14} />
+                    </a>
+                  )}
                   <button
                     className="btn btn-ghost btn-xs"
                     onClick={() => void handleRemove(selectedProject.id)}
@@ -1325,6 +1419,151 @@ export function App() {
                             </span>
                           )}
                         </a>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {selectedProject.github && selectedProject.github.milestones.length > 0 && (
+                  <div>
+                    <div className="insp-section-title">
+                      <span>GitHub Goals &amp; Milestones</span>
+                      <span className="nav-count">{selectedProject.github.milestones.length}</span>
+                    </div>
+                    <div className="checklist">
+                      {selectedProject.github.milestones.map((m) => {
+                        const total = m.openIssues + m.closedIssues;
+                        const pct = total > 0 ? Math.round((m.closedIssues / total) * 100) : 0;
+                        return (
+                          <a
+                            key={m.title}
+                            href={m.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="check-row"
+                            style={{ textDecoration: "none", color: "inherit", flexDirection: "column", alignItems: "stretch", gap: 6 }}
+                          >
+                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                              <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontWeight: 550 }}>
+                                <Target size={13} color="#a78bfa" /> {m.title}
+                              </span>
+                              <span className="mono-tag">{m.closedIssues}/{total} ({pct}%)</span>
+                            </div>
+                            <div style={{ height: 4, borderRadius: 99, background: "rgba(255,255,255,0.08)", overflow: "hidden" }}>
+                              <div style={{ width: `${pct}%`, height: "100%", background: "#a78bfa", borderRadius: 99 }} />
+                            </div>
+                          </a>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {selectedProject.github && selectedProject.github.openIssues.length > 0 && (
+                  <div>
+                    <div className="insp-section-title">
+                      <span>Open GitHub Issues</span>
+                      <span className="nav-count">{selectedProject.github.openIssues.length}</span>
+                    </div>
+                    <div className="checklist">
+                      {selectedProject.github.openIssues.slice(0, 6).map((issue) => (
+                        <a
+                          key={issue.number}
+                          href={issue.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="check-row"
+                          style={{ textDecoration: "none", color: "inherit" }}
+                        >
+                          <CircleDot size={13} color="#38bdf8" style={{ flexShrink: 0 }} />
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontWeight: 500 }}>
+                              #{issue.number} {issue.title}
+                            </div>
+                            {issue.labels.length > 0 && (
+                              <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 3 }}>
+                                {issue.labels.slice(0, 3).map((lbl) => (
+                                  <span key={lbl} className="mono-tag">{lbl}</span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {selectedProject.github && selectedProject.github.mergedPrs.length > 0 && (
+                  <div>
+                    <div className="insp-section-title">
+                      <span>Recently Shipped (Merged PRs)</span>
+                      <span className="nav-count">{selectedProject.github.mergedPrs.length}</span>
+                    </div>
+                    <div className="checklist">
+                      {selectedProject.github.mergedPrs.slice(0, 5).map((pr) => (
+                        <a
+                          key={pr.number}
+                          href={pr.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="check-row"
+                          style={{ textDecoration: "none", color: "inherit" }}
+                        >
+                          <GitMerge size={13} color="#34d399" style={{ flexShrink: 0 }} />
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontWeight: 500 }}>
+                              #{pr.number} {pr.title}
+                            </div>
+                            <div style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
+                              Merged {pr.mergedAt.slice(0, 10)}
+                            </div>
+                          </div>
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {selectedProject.agentSessions.length > 0 && (
+                  <div>
+                    <div className="insp-section-title">
+                      <span>Passive Agent Sessions</span>
+                      <span className="nav-count">{selectedProject.agentSessions.length}</span>
+                    </div>
+                    <div className="checklist">
+                      {selectedProject.agentSessions.map((sess) => (
+                        <div
+                          key={sess.agent}
+                          className="dispatch-card"
+                          style={{ padding: 10, gap: 6 }}
+                        >
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                            <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontWeight: 600, fontSize: 12.5 }}>
+                              <Bot size={13} color="#a78bfa" /> {sess.agent}
+                            </span>
+                            {sess.lastActiveAt && (
+                              <span style={{ fontSize: 10.5, fontFamily: "var(--font-mono)", color: "var(--text-muted)" }}>
+                                {new Date(sess.lastActiveAt).toLocaleString()}
+                              </span>
+                            )}
+                          </div>
+                          {sess.summary && (
+                            <div style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>
+                              {sess.summary}
+                            </div>
+                          )}
+                          {sess.tasks.length > 0 && (
+                            <div style={{ display: "flex", flexDirection: "column", gap: 3, marginTop: 2 }}>
+                              {sess.tasks.slice(0, 5).map((t, i) => (
+                                <div key={i} style={{ fontSize: 11.5, color: t.done ? "var(--text-muted)" : "var(--text)", textDecoration: t.done ? "line-through" : "none" }}>
+                                  {t.done ? "✓ " : "○ "}
+                                  {t.text}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
                       ))}
                     </div>
                   </div>
@@ -1468,171 +1707,175 @@ export function App() {
                   </div>
                 )}
 
-                <div>
-                  <div className="insp-section-title">
-                    <span>Bastion Guardrails</span>
-                    {selectedProject.antiSlop.hasSkill && (
-                      <span className="pill-badge pill-pass">Protected</span>
-                    )}
-                  </div>
-                  <div className="dispatch-card">
-                    {selectedProject.antiSlop.hasSkill ? (
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-                        <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>
-                          Verify:{" "}
-                          <code style={{ fontFamily: "var(--font-mono)", color: "var(--text)" }}>
-                            {selectedProject.antiSlop.verifyCmd ?? "auto-detected"}
-                          </code>
-                        </span>
+                {selectedProject.sourceType !== "remote" && (
+                  <>
+                    <div>
+                      <div className="insp-section-title">
+                        <span>Bastion Guardrails</span>
+                        {selectedProject.antiSlop.hasSkill && (
+                          <span className="pill-badge pill-pass">Protected</span>
+                        )}
+                      </div>
+                      <div className="dispatch-card">
+                        {selectedProject.antiSlop.hasSkill ? (
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                            <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+                              Verify:{" "}
+                              <code style={{ fontFamily: "var(--font-mono)", color: "var(--text)" }}>
+                                {selectedProject.antiSlop.verifyCmd ?? "auto-detected"}
+                              </code>
+                            </span>
+                            <button
+                              className="btn btn-xs"
+                              disabled={saving}
+                              onClick={() => void handleInstallBastion(selectedProject)}
+                              title="Update Bastion skill files (preserves your learnings & rules)"
+                            >
+                              <RefreshCw size={11} /> Update
+                            </button>
+                          </div>
+                        ) : (
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                            <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+                              Not set up yet. Install Bastion rules, skills &amp; auto-detect verify.
+                            </span>
+                            <motion.button
+                              whileTap={{ scale: 0.96 }}
+                              className="btn btn-xs btn-primary"
+                              disabled={saving}
+                              onClick={() => void handleInstallBastion(selectedProject)}
+                            >
+                              <Shield size={12} /> Setup Bastion
+                            </motion.button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="insp-section-title">
+                        <span>Built-In Agent &amp; Verify Console</span>
                         <button
-                          className="btn btn-xs"
-                          disabled={saving}
-                          onClick={() => void handleInstallBastion(selectedProject)}
-                          title="Update Bastion skill files (preserves your learnings & rules)"
+                          className="btn btn-ghost btn-xs"
+                          onClick={() => void handleCopyCmd(selectedProject)}
+                          title="Copy command to run in external terminal"
                         >
-                          <RefreshCw size={11} /> Update
+                          <Copy size={11} /> Copy Cmd
                         </button>
                       </div>
-                    ) : (
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-                        <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>
-                          Not set up yet. Install Bastion rules, skills &amp; auto-detect verify.
-                        </span>
-                        <motion.button
-                          whileTap={{ scale: 0.96 }}
-                          className="btn btn-xs btn-primary"
-                          disabled={saving}
-                          onClick={() => void handleInstallBastion(selectedProject)}
-                        >
-                          <Shield size={12} /> Setup Bastion
-                        </motion.button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                <div>
-                  <div className="insp-section-title">
-                    <span>Built-In Agent &amp; Verify Console</span>
-                    <button
-                      className="btn btn-ghost btn-xs"
-                      onClick={() => void handleCopyCmd(selectedProject)}
-                      title="Copy command to run in external terminal"
-                    >
-                      <Copy size={11} /> Copy Cmd
-                    </button>
-                  </div>
-                  <div className="dispatch-card">
-                    <div className="dispatch-pills">
-                      <motion.button
-                        whileTap={{ scale: 0.96 }}
-                        className="btn btn-xs btn-primary"
-                        disabled={runningExec}
-                        onClick={() => void handleRunExec(selectedProject, "verify")}
-                      >
-                        <Play size={11} /> Run Verify
-                      </motion.button>
-                      <motion.button
-                        whileTap={{ scale: 0.96 }}
-                        className="btn btn-xs"
-                        disabled={runningExec}
-                        onClick={() => void handleRunExec(selectedProject, "agent", "/bastion recap")}
-                      >
-                        /bastion recap
-                      </motion.button>
-                      <motion.button
-                        whileTap={{ scale: 0.96 }}
-                        className="btn btn-xs"
-                        disabled={runningExec}
-                        onClick={() => void handleRunExec(selectedProject, "agent", "/bastion audit")}
-                      >
-                        /bastion audit
-                      </motion.button>
-                      {runningExec && (
-                        <button className="btn btn-xs btn-danger" onClick={handleStopExec}>
-                          <Square size={10} /> Stop
-                        </button>
-                      )}
-                    </div>
-
-                    <div className="glass-segmented">
-                      <button
-                        className={`seg-option ${execMode === "agent" ? "active" : ""}`}
-                        onClick={() => setExecMode("agent")}
-                      >
-                        {execMode === "agent" && (
-                          <motion.span layoutId="exec-mode-pill" className="seg-pill-bg" transition={SPRING_SNAPPY} />
-                        )}
-                        <span className="seg-label">Ask {activeAgentObj.label}</span>
-                      </button>
-                      <button
-                        className={`seg-option ${execMode === "shell" ? "active" : ""}`}
-                        onClick={() => setExecMode("shell")}
-                      >
-                        {execMode === "shell" && (
-                          <motion.span layoutId="exec-mode-pill" className="seg-pill-bg" transition={SPRING_SNAPPY} />
-                        )}
-                        <span className="seg-label">Shell Command</span>
-                      </button>
-                    </div>
-
-                    <div className="input-inline">
-                      <input
-                        className="text-input"
-                        placeholder={
-                          execMode === "agent"
-                            ? `Prompt ${activeAgentObj.label} in ${selectedProject.name}...`
-                            : "Run a shell command (e.g., git status, npm test)..."
-                        }
-                        value={customPrompt}
-                        onChange={(e) => setCustomPrompt(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" && customPrompt.trim() && !runningExec) {
-                            void handleRunExec(selectedProject, execMode, customPrompt.trim());
-                            setCustomPrompt("");
-                          }
-                        }}
-                      />
-                      <button
-                        className="btn btn-xs btn-primary"
-                        disabled={runningExec || !customPrompt.trim()}
-                        onClick={() => {
-                          if (!customPrompt.trim()) return;
-                          void handleRunExec(selectedProject, execMode, customPrompt.trim());
-                          setCustomPrompt("");
-                        }}
-                      >
-                        <Play size={11} /> Run
-                      </button>
-                    </div>
-
-                    {consoleOutput && (
-                      <>
-                        <div className="console-header">
-                          <span style={{ fontSize: 10.5, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
-                            {runningExec ? "Streaming live output..." : "Output"}
-                          </span>
-                          <button
-                            className="btn btn-ghost btn-xs"
-                            onClick={() => setConsoleOutput("")}
+                      <div className="dispatch-card">
+                        <div className="dispatch-pills">
+                          <motion.button
+                            whileTap={{ scale: 0.96 }}
+                            className="btn btn-xs btn-primary"
+                            disabled={runningExec}
+                            onClick={() => void handleRunExec(selectedProject, "verify")}
                           >
-                            Clear
+                            <Play size={11} /> Run Verify
+                          </motion.button>
+                          <motion.button
+                            whileTap={{ scale: 0.96 }}
+                            className="btn btn-xs"
+                            disabled={runningExec}
+                            onClick={() => void handleRunExec(selectedProject, "agent", "/bastion recap")}
+                          >
+                            /bastion recap
+                          </motion.button>
+                          <motion.button
+                            whileTap={{ scale: 0.96 }}
+                            className="btn btn-xs"
+                            disabled={runningExec}
+                            onClick={() => void handleRunExec(selectedProject, "agent", "/bastion audit")}
+                          >
+                            /bastion audit
+                          </motion.button>
+                          {runningExec && (
+                            <button className="btn btn-xs btn-danger" onClick={handleStopExec}>
+                              <Square size={10} /> Stop
+                            </button>
+                          )}
+                        </div>
+
+                        <div className="glass-segmented">
+                          <button
+                            className={`seg-option ${execMode === "agent" ? "active" : ""}`}
+                            onClick={() => setExecMode("agent")}
+                          >
+                            {execMode === "agent" && (
+                              <motion.span layoutId="exec-mode-pill" className="seg-pill-bg" transition={SPRING_SNAPPY} />
+                            )}
+                            <span className="seg-label">Ask {activeAgentObj.label}</span>
+                          </button>
+                          <button
+                            className={`seg-option ${execMode === "shell" ? "active" : ""}`}
+                            onClick={() => setExecMode("shell")}
+                          >
+                            {execMode === "shell" && (
+                              <motion.span layoutId="exec-mode-pill" className="seg-pill-bg" transition={SPRING_SNAPPY} />
+                            )}
+                            <span className="seg-label">Shell Command</span>
                           </button>
                         </div>
-                        <div className="console-box">
-                          {consoleOutput}
-                          <div ref={consoleEndRef} />
+
+                        <div className="input-inline">
+                          <input
+                            className="text-input"
+                            placeholder={
+                              execMode === "agent"
+                                ? `Prompt ${activeAgentObj.label} in ${selectedProject.name}...`
+                                : "Run a shell command (e.g., git status, npm test)..."
+                            }
+                            value={customPrompt}
+                            onChange={(e) => setCustomPrompt(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" && customPrompt.trim() && !runningExec) {
+                                void handleRunExec(selectedProject, execMode, customPrompt.trim());
+                                setCustomPrompt("");
+                              }
+                            }}
+                          />
+                          <button
+                            className="btn btn-xs btn-primary"
+                            disabled={runningExec || !customPrompt.trim()}
+                            onClick={() => {
+                              if (!customPrompt.trim()) return;
+                              void handleRunExec(selectedProject, execMode, customPrompt.trim());
+                              setCustomPrompt("");
+                            }}
+                          >
+                            <Play size={11} /> Run
+                          </button>
                         </div>
-                      </>
-                    )}
-                  </div>
-                </div>
+
+                        {consoleOutput && (
+                          <>
+                            <div className="console-header">
+                              <span style={{ fontSize: 10.5, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
+                                {runningExec ? "Streaming live output..." : "Output"}
+                              </span>
+                              <button
+                                className="btn btn-ghost btn-xs"
+                                onClick={() => setConsoleOutput("")}
+                              >
+                                Clear
+                              </button>
+                            </div>
+                            <div className="console-box">
+                              {consoleOutput}
+                              <div ref={consoleEndRef} />
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </>
+                )}
 
                 <div>
                   <div className="insp-section-title">
                     <span>What&apos;s Next (Milestones)</span>
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      {selectedProject.status.plan.some((p) => !p.done) && (
+                      {selectedProject.sourceType !== "remote" && selectedProject.status.plan.some((p) => !p.done) && (
                         <button
                           className="btn btn-xs btn-primary"
                           disabled={runningExec}
@@ -1674,7 +1917,7 @@ export function App() {
                           {item.done && <Check size={11} strokeWidth={3} />}
                         </motion.button>
                         <span style={{ flex: 1 }}>{item.text}</span>
-                        {!item.done && (
+                        {!item.done && selectedProject.sourceType !== "remote" && (
                           <button
                             className="btn btn-xs"
                             disabled={runningExec}
@@ -1729,12 +1972,14 @@ export function App() {
                 <div>
                   <div className="insp-section-title">
                     <span>What Happened Recently</span>
-                    <button
-                      className="btn btn-ghost btn-xs"
-                      onClick={() => void handleAutoRecapOne(selectedProject)}
-                    >
-                      <RefreshCw size={11} /> Sync from Git
-                    </button>
+                    {selectedProject.sourceType !== "remote" && (
+                      <button
+                        className="btn btn-ghost btn-xs"
+                        onClick={() => void handleAutoRecapOne(selectedProject)}
+                      >
+                        <RefreshCw size={11} /> Sync from Git
+                      </button>
+                    )}
                   </div>
                   <div className="checklist">
                     {selectedProject.status.recap.map((r, idx) => (
@@ -1893,7 +2138,19 @@ export function App() {
                 </button>
               </div>
 
-              <div className="glass-segmented">
+              <div className="glass-segmented cols-3">
+                <button
+                  className={`seg-option ${addMode === "remote" ? "active" : ""}`}
+                  onClick={() => {
+                    setAddMode("remote");
+                    setScanCandidates(null);
+                  }}
+                >
+                  {addMode === "remote" && (
+                    <motion.span layoutId="add-mode-pill" className="seg-pill-bg" transition={SPRING_SNAPPY} />
+                  )}
+                  <span className="seg-label">GitHub Repo</span>
+                </button>
                 <button
                   className={`seg-option ${addMode === "scan" ? "active" : ""}`}
                   onClick={() => setAddMode("scan")}
@@ -1901,16 +2158,19 @@ export function App() {
                   {addMode === "scan" && (
                     <motion.span layoutId="add-mode-pill" className="seg-pill-bg" transition={SPRING_SNAPPY} />
                   )}
-                  <span className="seg-label">Scan Parent Folder</span>
+                  <span className="seg-label">Scan Folder</span>
                 </button>
                 <button
                   className={`seg-option ${addMode === "single" ? "active" : ""}`}
-                  onClick={() => setAddMode("single")}
+                  onClick={() => {
+                    setAddMode("single");
+                    setScanCandidates(null);
+                  }}
                 >
                   {addMode === "single" && (
                     <motion.span layoutId="add-mode-pill" className="seg-pill-bg" transition={SPRING_SNAPPY} />
                   )}
-                  <span className="seg-label">Single Repo Path</span>
+                  <span className="seg-label">Local Path</span>
                 </button>
               </div>
 
@@ -1919,9 +2179,11 @@ export function App() {
                   className="text-input"
                   autoFocus
                   placeholder={
-                    addMode === "scan"
-                      ? "C:\\Users\\you\\Projects (imports all git repos inside)"
-                      : "C:\\Users\\you\\Projects\\my-repo"
+                    addMode === "remote"
+                      ? "owner/repo or https://github.com/owner/repo"
+                      : addMode === "scan"
+                        ? "C:\\Users\\you\\Projects (imports all git repos inside)"
+                        : "C:\\Users\\you\\Projects\\my-repo"
                   }
                   value={pathInput}
                   onChange={(e) => setPathInput(e.target.value)}
@@ -1929,14 +2191,20 @@ export function App() {
                     if (e.key === "Enter") void handleAddSubmit();
                   }}
                 />
-                <button className="btn" onClick={() => void handleBrowseFolder()}>
-                  <FolderOpen size={14} /> Browse...
-                </button>
+                {addMode !== "remote" && (
+                  <button className="btn" onClick={() => void handleBrowseFolder()}>
+                    <FolderOpen size={14} /> Browse...
+                  </button>
+                )}
               </div>
 
               <input
                 className="text-input"
-                placeholder="Group name (optional — auto-fills from folder name)"
+                placeholder={
+                  addMode === "remote"
+                    ? "Group name (optional — e.g., Client, Remote, Side Projects)"
+                    : "Group name (optional — auto-fills from folder name)"
+                }
                 value={groupInput}
                 onChange={(e) => setGroupInput(e.target.value)}
               />
@@ -2000,7 +2268,11 @@ export function App() {
                   </button>
                 ) : (
                   <button className="btn btn-primary" onClick={() => void handleAddSubmit()}>
-                    {addMode === "scan" ? "Preview Repos" : "Add Repository"}
+                    {addMode === "remote"
+                      ? "Track GitHub Repo"
+                      : addMode === "scan"
+                        ? "Preview Repos"
+                        : "Add Repository"}
                   </button>
                 )}
               </div>

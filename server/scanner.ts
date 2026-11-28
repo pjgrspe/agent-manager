@@ -11,13 +11,16 @@ import {
   serializeStatusMarkdown,
   type VerifyCacheRecord,
 } from "../src/core/statusParser.ts";
+import { readAntigravitySessionForRepo } from "./antigravityReader.ts";
 import { readClaudeProjectSync } from "./claudeReader.ts";
-import { readGitHubPrs } from "./githubReader.ts";
+import { readGitHubProjectData } from "./githubReader.ts";
 import type {
+  AgentSessionSignal,
   AntiSlopInfo,
   GitCommitSummary,
   ManagedProject,
   ProjectGitData,
+  ProjectSourceType,
   ProjectStatusData,
   StandupSummary,
 } from "../src/core/types.ts";
@@ -28,6 +31,8 @@ export interface StoredProjectEntry {
   id: string;
   name: string;
   path: string;
+  sourceType?: ProjectSourceType;
+  githubRepo?: string;
   group?: string;
 }
 
@@ -50,6 +55,56 @@ async function readBranchFast(repoPath: string): Promise<string> {
 }
 
 async function scanProjectLight(entry: StoredProjectEntry): Promise<ManagedProject> {
+  const sourceType: ProjectSourceType = entry.sourceType ?? "local";
+  if (sourceType === "remote") {
+    const github = await readGitHubProjectData({
+      githubRepo: entry.githubRepo,
+      includeCommits: true,
+    });
+    const emptyStatus: ProjectStatusData = {
+      state: "Idle",
+      updated: "",
+      verify: "Unknown",
+      recap: github.mergedPrs.slice(0, 3).map((pr) => `Merged #${pr.number}: ${pr.title}`),
+      plan: github.openIssues.slice(0, 5).map((iss) => ({ text: `#${iss.number} ${iss.title}`, done: false })),
+      blockers: [],
+      hasStatusFile: false,
+    };
+    const remoteGit: ProjectGitData = {
+      isGitRepo: true,
+      branch: "remote",
+      headSha: github.remoteCommits[0]?.hash ?? "",
+      headTimestamp: github.remoteCommits[0]?.date ? `${github.remoteCommits[0].date}T12:00:00Z` : null,
+      dirtyCount: 0,
+      ahead: 0,
+      behind: 0,
+      recentCommits: github.remoteCommits,
+    };
+    const truth = computeGroundTruth({ exists: true, status: emptyStatus, git: remoteGit, github });
+    return {
+      id: entry.id,
+      name: entry.name,
+      path: entry.path,
+      sourceType: "remote",
+      githubRepo: entry.githubRepo,
+      group: entry.group,
+      exists: true,
+      status: { ...emptyStatus, state: truth.state, verify: truth.verifyHealth },
+      git: remoteGit,
+      antiSlop: {
+        hasAgentsMd: false,
+        hasClaudeMd: false,
+        hasSkill: false,
+        hasLearnings: false,
+        verifyCmd: null,
+        skillCount: 0,
+      },
+      agentSessions: [],
+      github,
+      truth,
+    };
+  }
+
   const exists = await pathExists(entry.path);
   const [status, antiSlop, branch] = exists
     ? await Promise.all([inspectStatus(entry.path), inspectAntiSlop(entry.path), readBranchFast(entry.path)])
@@ -90,11 +145,14 @@ async function scanProjectLight(entry: StoredProjectEntry): Promise<ManagedProje
     id: entry.id,
     name: entry.name,
     path: entry.path,
+    sourceType: "local",
+    githubRepo: entry.githubRepo,
     group: entry.group,
     exists,
     status: { ...status, state: truth.state, verify: truth.verifyHealth },
     git,
     antiSlop,
+    agentSessions: [],
     truth,
   };
 }
@@ -399,6 +457,11 @@ async function inspectStatus(repoPath: string): Promise<ProjectStatusData> {
 }
 
 export async function scanProject(entry: StoredProjectEntry): Promise<ManagedProject> {
+  const sourceType: ProjectSourceType = entry.sourceType ?? "local";
+  if (sourceType === "remote") {
+    return scanProjectLight(entry);
+  }
+
   const exists = await pathExists(entry.path);
   if (!exists) {
     const missingStatus: ProjectStatusData = {
@@ -424,6 +487,8 @@ export async function scanProject(entry: StoredProjectEntry): Promise<ManagedPro
       id: entry.id,
       name: entry.name,
       path: entry.path,
+      sourceType: "local",
+      githubRepo: entry.githubRepo,
       group: entry.group,
       exists: false,
       status: missingStatus,
@@ -436,18 +501,33 @@ export async function scanProject(entry: StoredProjectEntry): Promise<ManagedPro
         verifyCmd: null,
         skillCount: 0,
       },
+      agentSessions: [],
       truth: computeGroundTruth({ exists: false, status: missingStatus, git: emptyGit }),
     };
   }
 
-  const [status, git, antiSlop, claudeSync, github, verifyCache] = await Promise.all([
+  const [status, git, antiSlop, claudeSync, agySession, github, verifyCache] = await Promise.all([
     inspectStatus(entry.path),
     inspectGit(entry.path),
     inspectAntiSlop(entry.path),
     readClaudeProjectSync(entry.path),
-    readGitHubPrs(entry.path),
+    readAntigravitySessionForRepo(entry.name),
+    readGitHubProjectData({ repoPath: entry.path, githubRepo: entry.githubRepo }),
     loadVerifyCache(),
   ]);
+
+  const agentSessions: AgentSessionSignal[] = [];
+  if (claudeSync.found) {
+    agentSessions.push({
+      agent: "Claude Code",
+      lastActiveAt: claudeSync.lastSessionAt,
+      summary: `${claudeSync.memoryCount} memory file(s) · ${claudeSync.sessionTodos.length} session task(s)`,
+      tasks: claudeSync.sessionTodos,
+    });
+  }
+  if (agySession) {
+    agentSessions.push(agySession);
+  }
 
   const truth = computeGroundTruth({
     exists: true,
@@ -458,16 +538,29 @@ export async function scanProject(entry: StoredProjectEntry): Promise<ManagedPro
     verifyRecord: verifyCache[entry.id] ?? null,
   });
 
-  // Never inject noisy regex memory blockers; only surface active Claude todos if no manual plan exists
+  // Never force manual status maintenance: fall back to merged PRs, open issues, or recent passive agent tasks
   const recentClaudeSession = Boolean(
     claudeSync.lastSessionAt && Date.now() - Date.parse(claudeSync.lastSessionAt) <= 72 * 60 * 60 * 1000,
   );
+  const derivedRecap =
+    status.recap.length > 0
+      ? status.recap
+      : github.mergedPrs.slice(0, 3).map((pr) => `Merged #${pr.number}: ${pr.title}`);
+  const derivedPlan =
+    status.plan.length > 0
+      ? status.plan
+      : recentClaudeSession && claudeSync.sessionTodos.length > 0
+        ? claudeSync.sessionTodos
+        : agySession && agySession.tasks.length > 0
+          ? agySession.tasks
+          : github.openIssues.slice(0, 5).map((iss) => ({ text: `#${iss.number} ${iss.title}`, done: false }));
 
   const enrichedStatus: ProjectStatusData = {
     ...status,
     state: truth.state,
     verify: truth.verifyHealth,
-    plan: status.plan.length > 0 ? status.plan : recentClaudeSession ? claudeSync.sessionTodos : [],
+    recap: derivedRecap,
+    plan: derivedPlan,
     blockers: status.blockers,
   };
 
@@ -475,12 +568,15 @@ export async function scanProject(entry: StoredProjectEntry): Promise<ManagedPro
     id: entry.id,
     name: entry.name,
     path: entry.path,
+    sourceType: "local",
+    githubRepo: github.repoSlug ?? entry.githubRepo,
     group: entry.group,
     exists: true,
     status: enrichedStatus,
     git,
     antiSlop,
     claudeSync,
+    agentSessions,
     github,
     truth,
   };

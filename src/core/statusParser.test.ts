@@ -132,7 +132,12 @@ describe("statusParser", () => {
       git: baseGit,
       github: {
         available: true,
+        repoSlug: "org/repo",
         fetchedAt: "2026-11-28T00:00:00Z",
+        mergedPrs: [],
+        openIssues: [],
+        milestones: [],
+        remoteCommits: [],
         openPrs: [
           {
             number: 42,
@@ -160,7 +165,12 @@ describe("statusParser", () => {
       git: baseGit,
       github: {
         available: true,
+        repoSlug: "org/repo",
         fetchedAt: "2026-11-28T00:00:00Z",
+        mergedPrs: [],
+        openIssues: [],
+        milestones: [],
+        remoteCommits: [],
         openPrs: [
           {
             number: 42,

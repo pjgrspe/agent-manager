@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
 import type { AgentKind, ProjectStatusData } from "../src/core/types.ts";
+import { parseGitHubSlugFromUrl } from "./githubReader.ts";
 import {
   autoRecapProject,
   buildStandupSummary,
@@ -175,6 +176,37 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && pathname === "/api/standup") {
       const scanned = await getProjectsFast(false);
       sendJson(req, res, 200, buildStandupSummary(scanned));
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/projects/remote") {
+      const body = await readJsonBody<{ githubRepo?: string; name?: string; group?: string }>(req);
+      const raw = (body.githubRepo ?? "").trim();
+      const slug = raw.includes("github.com")
+        ? parseGitHubSlugFromUrl(raw)
+        : /^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/.test(raw)
+          ? raw
+          : null;
+      if (!slug) {
+        sendJson(req, res, 400, { error: "Enter a valid GitHub repo (owner/repo or URL)" });
+        return;
+      }
+      const entries = await loadProjectEntries();
+      const id = createId(`github:${slug}`);
+      if (!entries.some((e) => e.id === id)) {
+        entries.push({
+          id,
+          name: body.name?.trim() || slug.split("/")[1] || slug,
+          path: `https://github.com/${slug}`,
+          sourceType: "remote",
+          githubRepo: slug,
+          group: body.group?.trim() || undefined,
+        });
+        await saveProjectEntries(entries);
+        invalidateScanCache();
+      }
+      const scanned = await getProjectsFast(false);
+      sendJson(req, res, 200, { projects: scanned });
       return;
     }
 

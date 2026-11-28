@@ -1,6 +1,7 @@
 export type ProjectState = "Active" | "Waiting on Review" | "Blocked" | "Idle";
 export type VerifyHealth = "Pass" | "Fail" | "Stale" | "Unknown";
 export type AgentKind = "claude" | "antigravity" | "codex" | "cursor";
+export type ProjectSourceType = "local" | "remote";
 
 export interface PlanItem {
   text: string;
@@ -44,9 +45,36 @@ export interface PullRequestInfo {
   ciStatus: "Pass" | "Fail" | "Pending" | "None";
 }
 
+export interface MergedPrInfo {
+  number: number;
+  title: string;
+  url: string;
+  mergedAt: string;
+}
+
+export interface GitHubIssueInfo {
+  number: number;
+  title: string;
+  url: string;
+  labels: string[];
+}
+
+export interface GitHubMilestoneInfo {
+  title: string;
+  openIssues: number;
+  closedIssues: number;
+  dueOn: string | null;
+  url: string;
+}
+
 export interface GitHubSyncData {
   available: boolean;
+  repoSlug: string | null;
   openPrs: PullRequestInfo[];
+  mergedPrs: MergedPrInfo[];
+  openIssues: GitHubIssueInfo[];
+  milestones: GitHubMilestoneInfo[];
+  remoteCommits: GitCommitSummary[];
   fetchedAt: string | null;
 }
 
@@ -68,6 +96,13 @@ export interface ClaudeSyncData {
   memoryIndex?: string | null;
 }
 
+export interface AgentSessionSignal {
+  agent: "Claude Code" | "Antigravity";
+  lastActiveAt: string | null;
+  summary: string;
+  tasks: PlanItem[];
+}
+
 export interface GroundTruthSummary {
   state: ProjectState;
   reason: string;
@@ -82,12 +117,15 @@ export interface ManagedProject {
   id: string;
   name: string;
   path: string;
+  sourceType: ProjectSourceType;
+  githubRepo?: string;
   group?: string;
   exists: boolean;
   status: ProjectStatusData;
   git: ProjectGitData;
   antiSlop: AntiSlopInfo;
   claudeSync?: ClaudeSyncData;
+  agentSessions: AgentSessionSignal[];
   github?: GitHubSyncData;
   truth: GroundTruthSummary;
 }

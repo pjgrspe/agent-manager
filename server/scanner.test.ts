@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
+import { parseGitHubSlugFromUrl } from "./githubReader.ts";
 import { detectVerifyCommand, discoverReposInFolder, installBastionIntoRepo } from "./scanner.ts";
 
 describe("discoverReposInFolder", () => {
@@ -45,5 +46,13 @@ describe("discoverReposInFolder", () => {
     } finally {
       await fs.rm(tmp, { recursive: true, force: true });
     }
+  });
+
+  it("parses GitHub owner/repo slugs from HTTPS, SSH, and shorthand inputs", () => {
+    assert.equal(parseGitHubSlugFromUrl("pjgrspe/citadel"), "pjgrspe/citadel");
+    assert.equal(parseGitHubSlugFromUrl("https://github.com/pjgrspe/citadel.git"), "pjgrspe/citadel");
+    assert.equal(parseGitHubSlugFromUrl("https://github.com/pjgrspe/bastion/"), "pjgrspe/bastion");
+    assert.equal(parseGitHubSlugFromUrl("git@github.com:pjgrspe/citadel.git"), "pjgrspe/citadel");
+    assert.equal(parseGitHubSlugFromUrl("not-a-repo"), null);
   });
 });

@@ -1,4 +1,14 @@
-import type { ManagedProject, PlanItem, ProjectState, ProjectStatusData, VerifyHealth } from "./types.ts";
+import type {
+  ClaudeSyncData,
+  GitHubSyncData,
+  GroundTruthSummary,
+  ManagedProject,
+  PlanItem,
+  ProjectGitData,
+  ProjectState,
+  ProjectStatusData,
+  VerifyHealth,
+} from "./types.ts";
 
 const VALID_STATES: ReadonlySet<ProjectState> = new Set([
   "Active",
@@ -7,7 +17,7 @@ const VALID_STATES: ReadonlySet<ProjectState> = new Set([
   "Idle",
 ]);
 
-const VALID_VERIFY: ReadonlySet<VerifyHealth> = new Set(["Pass", "Fail", "Unknown"]);
+const VALID_VERIFY: ReadonlySet<VerifyHealth> = new Set(["Pass", "Fail", "Stale", "Unknown"]);
 
 function normalizeState(raw: string | undefined): ProjectState {
   const cleaned = raw?.replace(/`/g, "").trim() as ProjectState | undefined;
@@ -175,4 +185,182 @@ export function matchesStateFilter(
   if (filter === "All" || filter === "ControlCenter") return true;
   if (filter === "Blocked") return isProjectBlocked(project);
   return project.status.state === filter;
+}
+
+export interface VerifyCacheRecord {
+  headSha: string;
+  passed: boolean;
+  ranAt: string;
+}
+
+export function computeGroundTruth(input: {
+  exists: boolean;
+  status: ProjectStatusData;
+  git: ProjectGitData;
+  github?: GitHubSyncData;
+  claudeSync?: ClaudeSyncData;
+  verifyRecord?: VerifyCacheRecord | null;
+  nowMs?: number;
+}): GroundTruthSummary {
+  const nowMs = input.nowMs ?? Date.now();
+  const { exists, status, git, github, claudeSync, verifyRecord } = input;
+
+  if (!exists) {
+    return {
+      state: "Blocked",
+      reason: "Directory not found on disk",
+      source: "git",
+      verifyHealth: "Unknown",
+      verifySha: null,
+      verifyAt: null,
+      statusFileStale: false,
+    };
+  }
+
+  // 1. Compute Verify health with commit-SHA freshness
+  let verifyHealth: VerifyHealth = status.verify;
+  let verifySha: string | null = null;
+  let verifyAt: string | null = null;
+
+  if (verifyRecord) {
+    verifySha = verifyRecord.headSha;
+    verifyAt = verifyRecord.ranAt;
+    const shaMatches = !git.headSha || verifyRecord.headSha === git.headSha;
+    if (!verifyRecord.passed) {
+      verifyHealth = "Fail";
+    } else if (!shaMatches || git.dirtyCount > 0) {
+      verifyHealth = "Stale";
+    } else {
+      verifyHealth = "Pass";
+    }
+  } else if (status.verify === "Pass" && git.dirtyCount > 0) {
+    verifyHealth = "Stale";
+  }
+
+  // Check if .agents/status.md is older than latest git commit date
+  const latestCommitDate = git.recentCommits[0]?.date ?? "";
+  const statusFileStale = Boolean(
+    status.hasStatusFile && status.updated && latestCommitDate && status.updated < latestCommitDate,
+  );
+
+  // 2. Deterministic State Derivation (Trust Pyramid order)
+  const openPrs = github?.openPrs ?? [];
+  const failingPr = openPrs.find((pr) => pr.ciStatus === "Fail");
+  const reviewPr = openPrs.find((pr) => !pr.isDraft);
+
+  if (status.blockers.length > 0) {
+    return {
+      state: "Blocked",
+      reason: `Pinned blocker: ${status.blockers[0]}`,
+      source: "manual",
+      verifyHealth,
+      verifySha,
+      verifyAt,
+      statusFileStale,
+    };
+  }
+
+  if (failingPr) {
+    return {
+      state: "Blocked",
+      reason: `CI failing on PR #${failingPr.number}: ${failingPr.title}`,
+      source: "github",
+      verifyHealth: "Fail",
+      verifySha,
+      verifyAt,
+      statusFileStale,
+    };
+  }
+
+  if (verifyHealth === "Fail") {
+    return {
+      state: "Blocked",
+      reason: verifySha ? `Local verify failed on ${verifySha}` : "Local verify failed",
+      source: "verify",
+      verifyHealth,
+      verifySha,
+      verifyAt,
+      statusFileStale,
+    };
+  }
+
+  if (reviewPr) {
+    const ciLabel = reviewPr.ciStatus !== "None" ? ` · CI ${reviewPr.ciStatus}` : "";
+    return {
+      state: "Waiting on Review",
+      reason: `PR #${reviewPr.number} open${ciLabel}`,
+      source: "github",
+      verifyHealth,
+      verifySha,
+      verifyAt,
+      statusFileStale,
+    };
+  }
+
+  if (status.state === "Waiting on Review") {
+    return {
+      state: "Waiting on Review",
+      reason: "Marked ready for review",
+      source: "manual",
+      verifyHealth,
+      verifySha,
+      verifyAt,
+      statusFileStale,
+    };
+  }
+
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  const commitAgeMs = git.headTimestamp ? nowMs - Date.parse(git.headTimestamp) : Number.POSITIVE_INFINITY;
+  const claudeAgeMs = claudeSync?.lastSessionAt
+    ? nowMs - Date.parse(claudeSync.lastSessionAt)
+    : Number.POSITIVE_INFINITY;
+
+  if (git.dirtyCount > 0 || git.ahead > 0) {
+    const parts: string[] = [];
+    if (git.dirtyCount > 0) parts.push(`${git.dirtyCount} uncommitted`);
+    if (git.ahead > 0) parts.push(`${git.ahead} unpushed`);
+    return {
+      state: "Active",
+      reason: `${parts.join(" · ")} on ${git.branch}`,
+      source: "git",
+      verifyHealth,
+      verifySha,
+      verifyAt,
+      statusFileStale,
+    };
+  }
+
+  if (commitAgeMs <= DAY_MS) {
+    return {
+      state: "Active",
+      reason: `Recent commit on ${git.branch} (${git.headSha})`,
+      source: "git",
+      verifyHealth,
+      verifySha,
+      verifyAt,
+      statusFileStale,
+    };
+  }
+
+  if (claudeAgeMs <= DAY_MS) {
+    return {
+      state: "Active",
+      reason: "Active Claude Code session in last 24h",
+      source: "claude",
+      verifyHealth,
+      verifySha,
+      verifyAt,
+      statusFileStale,
+    };
+  }
+
+  return {
+    state: "Idle",
+    reason: latestCommitDate ? `Clean tree · last commit ${latestCommitDate}` : "Clean tree · no recent activity",
+    source: "git",
+    verifyHealth,
+    verifySha,
+    verifyAt,
+    statusFileStale,
+  };
 }

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   buildAutoRecapStatus,
+  computeGroundTruth,
   extractVerifyCommand,
   isProjectBlocked,
   matchesStateFilter,
@@ -101,5 +102,81 @@ describe("statusParser", () => {
     assert.equal(isProjectBlocked(proj), true);
     assert.equal(matchesStateFilter(proj, "Blocked"), true);
     assert.equal(matchesStateFilter(proj, "Waiting on Review"), false);
+  });
+
+  it("derives ground-truth state from GitHub PRs, CI failures, and commit-SHA verify staleness", () => {
+    const baseStatus = {
+      state: "Idle" as const,
+      updated: "2026-11-20",
+      verify: "Unknown" as const,
+      recap: [],
+      plan: [],
+      blockers: [],
+      hasStatusFile: true,
+    };
+    const baseGit = {
+      isGitRepo: true,
+      branch: "main",
+      headSha: "abc1234",
+      headTimestamp: "2026-11-10T10:00:00Z",
+      dirtyCount: 0,
+      ahead: 0,
+      behind: 0,
+      recentCommits: [{ hash: "abc1234", date: "2026-11-27", subject: "Ship feature" }],
+    };
+
+    // Open PR -> Waiting on Review + stale verify when HEAD moved past verified SHA
+    const prTruth = computeGroundTruth({
+      exists: true,
+      status: baseStatus,
+      git: baseGit,
+      github: {
+        available: true,
+        fetchedAt: "2026-11-28T00:00:00Z",
+        openPrs: [
+          {
+            number: 42,
+            title: "Add auth",
+            url: "https://github.com/org/repo/pull/42",
+            isDraft: false,
+            reviewDecision: "REVIEW_REQUIRED",
+            branch: "feat/auth",
+            ciStatus: "Pass",
+          },
+        ],
+      },
+      verifyRecord: { headSha: "old9999", passed: true, ranAt: "2026-11-26T00:00:00Z" },
+      nowMs: Date.parse("2026-11-28T00:00:00Z"),
+    });
+    assert.equal(prTruth.state, "Waiting on Review");
+    assert.equal(prTruth.source, "github");
+    assert.equal(prTruth.verifyHealth, "Stale");
+    assert.equal(prTruth.statusFileStale, true);
+
+    // Failing CI -> Blocked
+    const ciFailTruth = computeGroundTruth({
+      exists: true,
+      status: baseStatus,
+      git: baseGit,
+      github: {
+        available: true,
+        fetchedAt: "2026-11-28T00:00:00Z",
+        openPrs: [
+          {
+            number: 42,
+            title: "Add auth",
+            url: "https://github.com/org/repo/pull/42",
+            isDraft: false,
+            reviewDecision: "",
+            branch: "feat/auth",
+            ciStatus: "Fail",
+          },
+        ],
+      },
+      nowMs: Date.parse("2026-11-28T00:00:00Z"),
+    });
+    assert.equal(ciFailTruth.state, "Blocked");
+    assert.equal(ciFailTruth.verifyHealth, "Fail");
+    assert.match(ciFailTruth.reason, /CI failing on PR #42/);
   });
 });

@@ -10,6 +10,7 @@ import {
   FolderOpen,
   FolderPlus,
   GitBranch,
+  GitPullRequest,
   LayoutDashboard,
   Layers,
   Play,
@@ -972,14 +973,32 @@ export function App() {
                                         <span className="row-name">{project.name}</span>
                                         <span className={meta.pill}>{project.status.state}</span>
                                         {project.git.isGitRepo && (
-                                          <span className={`mono-tag ${project.git.dirtyCount > 0 ? "dirty" : ""}`}>
+                                          <span className={`mono-tag ${project.git.dirtyCount > 0 || project.git.ahead > 0 ? "dirty" : ""}`}>
                                             <GitBranch size={11} />
                                             {project.git.branch}
                                             {project.git.dirtyCount > 0 ? ` · ${project.git.dirtyCount} dirty` : ""}
+                                            {project.git.ahead > 0 ? ` · ↑${project.git.ahead}` : ""}
                                           </span>
                                         )}
-                                        {project.status.verify === "Pass" && (
+                                        {project.github?.openPrs[0] && (
+                                          <span
+                                            className={`pill-badge ${
+                                              project.github.openPrs[0].ciStatus === "Fail"
+                                                ? "pill-blocked"
+                                                : "pill-review"
+                                            }`}
+                                          >
+                                            <GitPullRequest size={10} /> PR #{project.github.openPrs[0].number}
+                                            {project.github.openPrs[0].ciStatus !== "None"
+                                              ? ` · CI ${project.github.openPrs[0].ciStatus}`
+                                              : ""}
+                                          </span>
+                                        )}
+                                        {project.truth.verifyHealth === "Pass" && (
                                           <span className="pill-badge pill-pass">Verify Pass</span>
+                                        )}
+                                        {project.truth.verifyHealth === "Stale" && (
+                                          <span className="pill-badge pill-review">Verify Stale</span>
                                         )}
                                         {project.antiSlop.hasSkill && (
                                           <span className="mono-tag">
@@ -988,6 +1007,13 @@ export function App() {
                                         )}
                                       </div>
                                       <div className="row-details" style={{ marginTop: 5 }}>
+                                        <div className="row-line">
+                                          <span className="row-line-label">Signal</span>
+                                          <span className="row-line-text">
+                                            {project.truth.reason}
+                                            {project.truth.statusFileStale ? " · (status.md outdated)" : ""}
+                                          </span>
+                                        </div>
                                         <div className="row-line">
                                           <span className="row-line-label">Recent</span>
                                           <span className="row-line-text">{latestRecap}</span>
@@ -1077,14 +1103,32 @@ export function App() {
                                   {project.group && <span className="mono-tag">{project.group}</span>}
                                   <span className={meta.pill}>{project.status.state}</span>
                                   {project.git.isGitRepo && (
-                                    <span className={`mono-tag ${project.git.dirtyCount > 0 ? "dirty" : ""}`}>
+                                    <span className={`mono-tag ${project.git.dirtyCount > 0 || project.git.ahead > 0 ? "dirty" : ""}`}>
                                       <GitBranch size={11} />
                                       {project.git.branch}
                                       {project.git.dirtyCount > 0 ? ` · ${project.git.dirtyCount} dirty` : ""}
+                                      {project.git.ahead > 0 ? ` · ↑${project.git.ahead}` : ""}
                                     </span>
                                   )}
-                                  {project.status.verify === "Pass" && (
+                                  {project.github?.openPrs[0] && (
+                                    <span
+                                      className={`pill-badge ${
+                                        project.github.openPrs[0].ciStatus === "Fail"
+                                          ? "pill-blocked"
+                                          : "pill-review"
+                                      }`}
+                                    >
+                                      <GitPullRequest size={10} /> PR #{project.github.openPrs[0].number}
+                                      {project.github.openPrs[0].ciStatus !== "None"
+                                        ? ` · CI ${project.github.openPrs[0].ciStatus}`
+                                        : ""}
+                                    </span>
+                                  )}
+                                  {project.truth.verifyHealth === "Pass" && (
                                     <span className="pill-badge pill-pass">Verify Pass</span>
+                                  )}
+                                  {project.truth.verifyHealth === "Stale" && (
+                                    <span className="pill-badge pill-review">Verify Stale</span>
                                   )}
                                   {project.antiSlop.hasSkill && (
                                     <span className="mono-tag" title="Bastion guardrails active">
@@ -1094,6 +1138,13 @@ export function App() {
                                 </div>
 
                                 <div className="row-details">
+                                  <div className="row-line">
+                                    <span className="row-line-label">Signal</span>
+                                    <span className="row-line-text">
+                                      {project.truth.reason}
+                                      {project.truth.statusFileStale ? " · (status.md outdated)" : ""}
+                                    </span>
+                                  </div>
                                   <div className="row-line">
                                     <span className="row-line-label">Recent</span>
                                     <span className="row-line-text">{latestRecap}</span>
@@ -1186,6 +1237,80 @@ export function App() {
                 transition={{ duration: 0.2 }}
               >
                 <div>
+                  <div className="insp-section-title">
+                    <span>Ground-Truth Signal</span>
+                    <span className="mono-tag" style={{ textTransform: "uppercase" }}>
+                      {selectedProject.truth.source}
+                    </span>
+                  </div>
+                  <div className="dispatch-card">
+                    <div style={{ fontSize: 12.5, color: "var(--text)" }}>
+                      {selectedProject.truth.reason}
+                    </div>
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", fontSize: 11, color: "var(--text-muted)" }}>
+                      {selectedProject.git.headSha && (
+                        <span className="mono-tag">HEAD {selectedProject.git.headSha}</span>
+                      )}
+                      {selectedProject.git.ahead > 0 && (
+                        <span className="mono-tag dirty">↑ {selectedProject.git.ahead} unpushed</span>
+                      )}
+                      {selectedProject.truth.verifySha && (
+                        <span className="mono-tag">
+                          Verified {selectedProject.truth.verifyHealth} on {selectedProject.truth.verifySha}
+                        </span>
+                      )}
+                      {selectedProject.truth.statusFileStale && (
+                        <span className="pill-badge pill-review">status.md behind HEAD</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {selectedProject.github && selectedProject.github.openPrs.length > 0 && (
+                  <div>
+                    <div className="insp-section-title">
+                      <span>Open GitHub Pull Requests</span>
+                      <span className="nav-count">{selectedProject.github.openPrs.length}</span>
+                    </div>
+                    <div className="checklist">
+                      {selectedProject.github.openPrs.map((pr) => (
+                        <a
+                          key={pr.number}
+                          href={pr.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="check-row"
+                          style={{ textDecoration: "none", color: "inherit" }}
+                        >
+                          <GitPullRequest size={13} color={pr.ciStatus === "Fail" ? "#fb7185" : "#fbbf24"} />
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontWeight: 550 }}>
+                              #{pr.number} {pr.title}
+                            </div>
+                            <div style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
+                              {pr.branch} {pr.isDraft ? "· Draft" : ""}
+                            </div>
+                          </div>
+                          {pr.ciStatus !== "None" && (
+                            <span
+                              className={`pill-badge ${
+                                pr.ciStatus === "Pass"
+                                  ? "pill-pass"
+                                  : pr.ciStatus === "Fail"
+                                    ? "pill-blocked"
+                                    : "pill-review"
+                              }`}
+                            >
+                              CI {pr.ciStatus}
+                            </span>
+                          )}
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div>
                   <div className="insp-section-title">Display Name &amp; Group</div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                     <input
@@ -1255,8 +1380,8 @@ export function App() {
 
                 <div>
                   <div className="insp-section-title">Verification Health</div>
-                  <div className="glass-segmented cols-3">
-                    {(["Pass", "Fail", "Unknown"] as VerifyHealth[]).map((v) => {
+                  <div className="glass-segmented cols-4">
+                    {(["Pass", "Stale", "Fail", "Unknown"] as VerifyHealth[]).map((v) => {
                       const active = selectedProject.status.verify === v;
                       return (
                         <button

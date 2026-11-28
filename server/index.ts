@@ -11,6 +11,7 @@ import {
   discoverReposInFolder,
   installBastionIntoRepo,
   loadProjectEntries,
+  recordVerifyRun,
   saveProjectEntries,
   scanProject,
   writeProjectStatus,
@@ -426,7 +427,9 @@ const server = http.createServer(async (req, res) => {
         res.write(`\n[exited with code ${code ?? -1}]\n`);
         if (mode === "verify") {
           try {
-            const verifyHealth = code === 0 ? "Pass" : "Fail";
+            const passed = code === 0;
+            const verifyHealth = passed ? "Pass" : "Fail";
+            await recordVerifyRun(target.id, scanned.git.headSha, passed);
             await writeProjectStatus(target.path, {
               ...scanned.status,
               verify: verifyHealth,

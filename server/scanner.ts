@@ -5,11 +5,14 @@ import path from "node:path";
 import { promisify } from "node:util";
 import {
   buildAutoRecapStatus,
+  computeGroundTruth,
   extractVerifyCommand,
   parseStatusMarkdown,
   serializeStatusMarkdown,
+  type VerifyCacheRecord,
 } from "../src/core/statusParser.ts";
 import { readClaudeProjectSync } from "./claudeReader.ts";
+import { readGitHubPrs } from "./githubReader.ts";
 import type {
   AntiSlopInfo,
   GitCommitSummary,
@@ -30,6 +33,34 @@ export interface StoredProjectEntry {
 
 const DATA_DIR = path.resolve(process.cwd(), ".data");
 const PROJECTS_FILE = path.join(DATA_DIR, "projects.json");
+const VERIFY_CACHE_FILE = path.join(DATA_DIR, "verify-cache.json");
+
+export async function loadVerifyCache(): Promise<Record<string, VerifyCacheRecord>> {
+  try {
+    const raw = await fs.readFile(VERIFY_CACHE_FILE, "utf8");
+    const parsed = JSON.parse(raw) as unknown;
+    return typeof parsed === "object" && parsed !== null
+      ? (parsed as Record<string, VerifyCacheRecord>)
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+export async function recordVerifyRun(
+  projectId: string,
+  headSha: string,
+  passed: boolean,
+): Promise<void> {
+  const current = await loadVerifyCache();
+  current[projectId] = {
+    headSha,
+    passed,
+    ranAt: new Date().toISOString(),
+  };
+  await fs.mkdir(DATA_DIR, { recursive: true });
+  await fs.writeFile(VERIFY_CACHE_FILE, JSON.stringify(current, null, 2), "utf8");
+}
 
 async function pathExists(p: string): Promise<boolean> {
   try {
@@ -96,14 +127,34 @@ async function runGit(repoPath: string, args: string[]): Promise<string | null> 
 async function inspectGit(repoPath: string): Promise<ProjectGitData> {
   const isGitRepo = await pathExists(path.join(repoPath, ".git"));
   if (!isGitRepo) {
-    return { isGitRepo: false, branch: "", dirtyCount: 0, recentCommits: [] };
+    return {
+      isGitRepo: false,
+      branch: "",
+      headSha: "",
+      headTimestamp: null,
+      dirtyCount: 0,
+      ahead: 0,
+      behind: 0,
+      recentCommits: [],
+    };
   }
 
-  const [branchOut, statusOut, logOut] = await Promise.all([
+  const [branchOut, headShaOut, headTimeOut, aheadBehindOut, statusOut, logOut] = await Promise.all([
     runGit(repoPath, ["rev-parse", "--abbrev-ref", "HEAD"]),
+    runGit(repoPath, ["rev-parse", "--short", "HEAD"]),
+    runGit(repoPath, ["log", "-1", "--format=%cI"]),
+    runGit(repoPath, ["rev-list", "--left-right", "--count", "@{u}...HEAD"]),
     runGit(repoPath, ["status", "--porcelain"]),
     runGit(repoPath, ["log", "-n", "20", "--pretty=format:%h|%cs|%s"]),
   ]);
+
+  let behind = 0;
+  let ahead = 0;
+  if (aheadBehindOut) {
+    const [bStr, aStr] = aheadBehindOut.split(/\s+/);
+    behind = Number(bStr ?? 0) || 0;
+    ahead = Number(aStr ?? 0) || 0;
+  }
 
   const dirtyCount = statusOut ? statusOut.split(/\r?\n/).filter(Boolean).length : 0;
   const recentCommits: GitCommitSummary[] = logOut
@@ -119,7 +170,11 @@ async function inspectGit(repoPath: string): Promise<ProjectGitData> {
   return {
     isGitRepo: true,
     branch: branchOut || "HEAD",
+    headSha: headShaOut || "",
+    headTimestamp: headTimeOut || null,
     dirtyCount,
+    ahead,
+    behind,
     recentCommits,
   };
 }
@@ -181,22 +236,33 @@ async function inspectStatus(repoPath: string): Promise<ProjectStatusData> {
 export async function scanProject(entry: StoredProjectEntry): Promise<ManagedProject> {
   const exists = await pathExists(entry.path);
   if (!exists) {
+    const missingStatus: ProjectStatusData = {
+      state: "Blocked",
+      updated: "",
+      verify: "Unknown",
+      recap: [],
+      plan: [],
+      blockers: ["Directory not found on disk"],
+      hasStatusFile: false,
+    };
+    const emptyGit: ProjectGitData = {
+      isGitRepo: false,
+      branch: "",
+      headSha: "",
+      headTimestamp: null,
+      dirtyCount: 0,
+      ahead: 0,
+      behind: 0,
+      recentCommits: [],
+    };
     return {
       id: entry.id,
       name: entry.name,
       path: entry.path,
       group: entry.group,
       exists: false,
-      status: {
-        state: "Idle",
-        updated: "",
-        verify: "Unknown",
-        recap: [],
-        plan: [],
-        blockers: ["Directory not found on disk"],
-        hasStatusFile: false,
-      },
-      git: { isGitRepo: false, branch: "", dirtyCount: 0, recentCommits: [] },
+      status: missingStatus,
+      git: emptyGit,
       antiSlop: {
         hasAgentsMd: false,
         hasClaudeMd: false,
@@ -205,21 +271,39 @@ export async function scanProject(entry: StoredProjectEntry): Promise<ManagedPro
         verifyCmd: null,
         skillCount: 0,
       },
+      truth: computeGroundTruth({ exists: false, status: missingStatus, git: emptyGit }),
     };
   }
 
-  const [status, git, antiSlop, claudeSync] = await Promise.all([
+  const [status, git, antiSlop, claudeSync, github, verifyCache] = await Promise.all([
     inspectStatus(entry.path),
     inspectGit(entry.path),
     inspectAntiSlop(entry.path),
     readClaudeProjectSync(entry.path),
+    readGitHubPrs(entry.path),
+    loadVerifyCache(),
   ]);
 
-  // If .agents/status.md has no plan or blockers yet, surface live Claude session todos & memory flags
+  const truth = computeGroundTruth({
+    exists: true,
+    status,
+    git,
+    github,
+    claudeSync,
+    verifyRecord: verifyCache[entry.id] ?? null,
+  });
+
+  // Never inject noisy regex memory blockers; only surface active Claude todos if no manual plan exists
+  const recentClaudeSession = Boolean(
+    claudeSync.lastSessionAt && Date.now() - Date.parse(claudeSync.lastSessionAt) <= 72 * 60 * 60 * 1000,
+  );
+
   const enrichedStatus: ProjectStatusData = {
     ...status,
-    plan: status.plan.length > 0 ? status.plan : claudeSync.sessionTodos,
-    blockers: status.blockers.length > 0 ? status.blockers : claudeSync.memoryFlags,
+    state: truth.state,
+    verify: truth.verifyHealth,
+    plan: status.plan.length > 0 ? status.plan : recentClaudeSession ? claudeSync.sessionTodos : [],
+    blockers: status.blockers,
   };
 
   return {
@@ -232,6 +316,8 @@ export async function scanProject(entry: StoredProjectEntry): Promise<ManagedPro
     git,
     antiSlop,
     claudeSync,
+    github,
+    truth,
   };
 }
 

@@ -76,7 +76,7 @@ async function createWindow() {
     minWidth: 960,
     minHeight: 640,
     backgroundColor: "#07070a",
-    title: "Citadel — Control Center",
+    title: "Meridian — Project Manager",
     autoHideMenuBar: true,
     webPreferences: {
       contextIsolation: true,

@@ -473,7 +473,7 @@ export function App() {
               <Layers size={15} strokeWidth={2.3} />
             </span>
             <div>
-              <div className="brand-title">Citadel</div>
+              <div className="brand-title">Meridian</div>
               <div className="brand-sub">Project Manager</div>
             </div>
           </div>

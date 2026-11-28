@@ -214,6 +214,11 @@ export function App() {
 
   useEffect(() => {
     void loadAll(false);
+    // Quick background hydration pass to pick up async GitHub PR/CI cache
+    const hydrateTimer = window.setTimeout(() => {
+      void loadAll(true);
+    }, 2500);
+    return () => window.clearTimeout(hydrateTimer);
   }, [loadAll]);
 
   // Dynamic live auto-refresh: every 15s + on window focus

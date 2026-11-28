@@ -9,8 +9,9 @@ interface CacheEntry {
   expiresAt: number;
 }
 
-const CACHE_TTL_MS = 60_000;
+const CACHE_TTL_MS = 90_000;
 const cache = new Map<string, CacheEntry>();
+const inFlight = new Set<string>();
 
 function summarizeChecks(
   rollup: Array<{ conclusion?: string | null; status?: string | null; state?: string | null }> | undefined,
@@ -30,65 +31,71 @@ function summarizeChecks(
   return hasPending ? "Pending" : "Pass";
 }
 
-export async function readGitHubPrs(repoPath: string, force = false): Promise<GitHubSyncData> {
+function refreshInBackground(repoPath: string): void {
+  if (inFlight.has(repoPath)) return;
+  inFlight.add(repoPath);
+
+  void (async () => {
+    const now = Date.now();
+    try {
+      const { stdout } = await execFileAsync(
+        "gh",
+        [
+          "pr",
+          "list",
+          "--state",
+          "open",
+          "--limit",
+          "5",
+          "--json",
+          "number,title,url,isDraft,reviewDecision,headRefName,statusCheckRollup",
+        ],
+        { cwd: repoPath, timeout: 4500, windowsHide: true },
+      );
+
+      const parsed = JSON.parse(stdout) as Array<{
+        number: number;
+        title: string;
+        url: string;
+        isDraft?: boolean;
+        reviewDecision?: string;
+        headRefName?: string;
+        statusCheckRollup?: Array<{ conclusion?: string | null; status?: string | null; state?: string | null }>;
+      }>;
+
+      const openPrs: PullRequestInfo[] = Array.isArray(parsed)
+        ? parsed.map((pr) => ({
+            number: pr.number,
+            title: pr.title,
+            url: pr.url,
+            isDraft: Boolean(pr.isDraft),
+            reviewDecision: pr.reviewDecision ?? "",
+            branch: pr.headRefName ?? "",
+            ciStatus: summarizeChecks(pr.statusCheckRollup),
+          }))
+        : [];
+
+      cache.set(repoPath, {
+        data: { available: true, openPrs, fetchedAt: new Date(now).toISOString() },
+        expiresAt: now + CACHE_TTL_MS,
+      });
+    } catch {
+      cache.set(repoPath, {
+        data: { available: false, openPrs: [], fetchedAt: null },
+        expiresAt: now + CACHE_TTL_MS,
+      });
+    } finally {
+      inFlight.delete(repoPath);
+    }
+  })();
+}
+
+// Non-blocking stale-while-revalidate: returns cached data in 0ms and refreshes gh in background
+export async function readGitHubPrs(repoPath: string): Promise<GitHubSyncData> {
   const now = Date.now();
   const cached = cache.get(repoPath);
-  if (!force && cached && cached.expiresAt > now) {
-    return cached.data;
+  if (!cached || cached.expiresAt <= now) {
+    refreshInBackground(repoPath);
   }
-
-  try {
-    const { stdout } = await execFileAsync(
-      "gh",
-      [
-        "pr",
-        "list",
-        "--state",
-        "open",
-        "--limit",
-        "5",
-        "--json",
-        "number,title,url,isDraft,reviewDecision,headRefName,statusCheckRollup",
-      ],
-      { cwd: repoPath, timeout: 4500, windowsHide: true },
-    );
-
-    const parsed = JSON.parse(stdout) as Array<{
-      number: number;
-      title: string;
-      url: string;
-      isDraft?: boolean;
-      reviewDecision?: string;
-      headRefName?: string;
-      statusCheckRollup?: Array<{ conclusion?: string | null; status?: string | null; state?: string | null }>;
-    }>;
-
-    const openPrs: PullRequestInfo[] = Array.isArray(parsed)
-      ? parsed.map((pr) => ({
-          number: pr.number,
-          title: pr.title,
-          url: pr.url,
-          isDraft: Boolean(pr.isDraft),
-          reviewDecision: pr.reviewDecision ?? "",
-          branch: pr.headRefName ?? "",
-          ciStatus: summarizeChecks(pr.statusCheckRollup),
-        }))
-      : [];
-
-    const data: GitHubSyncData = {
-      available: true,
-      openPrs,
-      fetchedAt: new Date(now).toISOString(),
-    };
-    cache.set(repoPath, { data, expiresAt: now + CACHE_TTL_MS });
-    return data;
-  } catch {
-    const data: GitHubSyncData = {
-      available: false,
-      openPrs: [],
-      fetchedAt: null,
-    };
-    cache.set(repoPath, { data, expiresAt: now + CACHE_TTL_MS });
-    return data;
-  }
+  return cached?.data ?? { available: false, openPrs: [], fetchedAt: null };
 }

@@ -52,6 +52,13 @@ type FilterState = "ControlCenter" | "Memory" | "All" | ProjectState;
 const SPRING_SNAPPY = { type: "spring" as const, stiffness: 460, damping: 34 };
 const SPRING_SMOOTH = { type: "spring" as const, stiffness: 320, damping: 30 };
 
+function cleanText(raw: string): string {
+  return raw
+    .replace(/^Pinned blocker:\s*/i, "")
+    .replace(/`([^`]+)`/g, "$1")
+    .trim();
+}
+
 function stateMeta(state: ProjectState) {
   switch (state) {
     case "Active":
@@ -156,9 +163,7 @@ export function App() {
   const [standupTab, setStandupTab] = useState<"visual" | "markdown">("visual");
   const [copiedStandup, setCopiedStandup] = useState(false);
 
-  const [newPlanText, setNewPlanText] = useState("");
   const [newRecapText, setNewRecapText] = useState("");
-  const [newBlockerText, setNewBlockerText] = useState("");
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<{ label: string; detail?: string } | null>(null);
   const [showClaudeMemory, setShowClaudeMemory] = useState(false);
@@ -1022,7 +1027,9 @@ export function App() {
                       </span>
                     )}
                   </div>
-                  <div className="inspector-path">{selectedProject.path}</div>
+                  <div className="inspector-path">
+                    {selectedProject.githubRepo ?? selectedProject.group ?? "Local project"}
+                  </div>
                 </div>
                 <div style={{ display: "flex", gap: 4 }}>
                   {selectedProject.githubRepo && (
@@ -1038,16 +1045,8 @@ export function App() {
                   )}
                   <button
                     className="btn btn-ghost btn-xs"
-                    onClick={() => void handleRemove(selectedProject.id)}
-                    title="Untrack repository (keeps files on disk)"
-                    style={{ color: "var(--rose)" }}
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                  <button
-                    className="btn btn-ghost btn-xs"
                     onClick={() => setSelectedId(null)}
-                    title="Close inspector (Esc)"
+                    title="Close panel (Esc)"
                   >
                     <X size={15} />
                   </button>
@@ -1086,91 +1085,68 @@ export function App() {
                   <>
                     <div>
                       <div className="insp-section-title">Status</div>
-                      <div className="dispatch-card" style={{ gap: 10 }}>
-                        <div style={{ fontSize: 12.5, color: "var(--text)" }}>
-                          {selectedProject.truth.reason}
-                        </div>
-                        <div className="glass-segmented cols-4">
-                          {(["Active", "Waiting on Review", "Blocked", "Idle"] as ProjectState[]).map(
-                            (st) => {
-                              const active = selectedProject.status.state === st;
-                              return (
-                                <button
-                                  key={st}
-                                  disabled={saving}
-                                  className={`seg-option ${active ? "active" : ""}`}
-                                  onClick={() => void saveStatusUpdate(selectedProject, { state: st })}
-                                >
-                                  {active && (
-                                    <motion.span
-                                      layoutId="insp-state-pill"
-                                      className="seg-pill-bg"
-                                      transition={SPRING_SNAPPY}
-                                    />
-                                  )}
-                                  <span className="seg-label">
-                                    {st === "Waiting on Review" ? "Review" : st}
-                                  </span>
-                                </button>
-                              );
-                            },
-                          )}
-                        </div>
+                      <div className="glass-segmented cols-4">
+                        {(["Active", "Waiting on Review", "Blocked", "Idle"] as ProjectState[]).map(
+                          (st) => {
+                            const active = selectedProject.status.state === st;
+                            return (
+                              <button
+                                key={st}
+                                disabled={saving}
+                                className={`seg-option ${active ? "active" : ""}`}
+                                onClick={() => void saveStatusUpdate(selectedProject, { state: st })}
+                              >
+                                {active && (
+                                  <motion.span
+                                    layoutId="insp-state-pill"
+                                    className="seg-pill-bg"
+                                    transition={SPRING_SNAPPY}
+                                  />
+                                )}
+                                <span className="seg-label">
+                                  {st === "Waiting on Review" ? "Review" : st}
+                                </span>
+                              </button>
+                            );
+                          },
+                        )}
                       </div>
+                      {selectedProject.status.blockers.length === 0 && (
+                        <div style={{ fontSize: 12, color: "var(--text-secondary)", marginTop: 8 }}>
+                          {cleanText(selectedProject.truth.reason)}
+                        </div>
+                      )}
                     </div>
 
-                    <div>
-                      <div className="insp-section-title">Needs Your Decision</div>
-                      <div className="checklist">
-                        {selectedProject.status.blockers.map((b, idx) => (
-                          <div
-                            key={idx}
-                            className="row-blocker"
-                            style={{ width: "100%", justifyContent: "space-between" }}
-                          >
-                            <span style={{ flex: 1 }}>{b}</span>
-                            <button
-                              className="btn btn-xs"
-                              onClick={() =>
-                                void saveStatusUpdate(selectedProject, {
-                                  blockers: selectedProject.status.blockers.filter((_, i) => i !== idx),
-                                })
-                              }
+                    {selectedProject.status.blockers.length > 0 && (
+                      <div>
+                        <div className="insp-section-title">
+                          <span>Needs Your Decision</span>
+                          <span className="nav-count">{selectedProject.status.blockers.length}</span>
+                        </div>
+                        <div className="checklist">
+                          {selectedProject.status.blockers.map((b, idx) => (
+                            <div
+                              key={idx}
+                              className="row-blocker"
+                              style={{ width: "100%", justifyContent: "space-between", alignItems: "flex-start" }}
                             >
-                              Resolve
-                            </button>
-                          </div>
-                        ))}
-                        <div className="input-inline" style={{ marginTop: 4 }}>
-                          <input
-                            className="text-input"
-                            placeholder="Add an open decision or blocker..."
-                            value={newBlockerText}
-                            onChange={(e) => setNewBlockerText(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter" && newBlockerText.trim()) {
-                                void saveStatusUpdate(selectedProject, {
-                                  blockers: [...selectedProject.status.blockers, newBlockerText.trim()],
-                                });
-                                setNewBlockerText("");
-                              }
-                            }}
-                          />
-                          <button
-                            className="btn btn-xs"
-                            onClick={() => {
-                              if (!newBlockerText.trim()) return;
-                              void saveStatusUpdate(selectedProject, {
-                                blockers: [...selectedProject.status.blockers, newBlockerText.trim()],
-                              });
-                              setNewBlockerText("");
-                            }}
-                          >
-                            <Plus size={12} />
-                          </button>
+                              <span style={{ flex: 1, lineHeight: 1.4 }}>{cleanText(b)}</span>
+                              <button
+                                className="btn btn-xs"
+                                onClick={() =>
+                                  void saveStatusUpdate(selectedProject, {
+                                    blockers: selectedProject.status.blockers.filter((_, i) => i !== idx),
+                                  })
+                                }
+                              >
+                                Done
+                              </button>
+                            </div>
+                          ))}
                         </div>
                       </div>
-                    </div>
+                    )}
 
                     {selectedProject.github && selectedProject.github.openPrs.length > 0 && (
                       <div>
@@ -1204,7 +1180,7 @@ export function App() {
                     {selectedProject.github && selectedProject.github.milestones.length > 0 && (
                       <div>
                         <div className="insp-section-title">
-                          <span>GitHub Milestones</span>
+                          <span>Milestones</span>
                           <span className="nav-count">{selectedProject.github.milestones.length}</span>
                         </div>
                         <div className="checklist">
@@ -1236,76 +1212,41 @@ export function App() {
                       </div>
                     )}
 
-                    <div>
-                      <div className="insp-section-title">
-                        <span>Planned Goals</span>
-                        <span style={{ fontFamily: "var(--font-mono)" }}>
-                          {selectedProject.status.plan.filter((p) => p.done).length}/
-                          {selectedProject.status.plan.length}
-                        </span>
-                      </div>
-                      <div className="checklist">
-                        {selectedProject.status.plan.map((item, idx) => (
-                          <motion.div
-                            layout
-                            key={`${idx}-${item.text}`}
-                            className={`check-row ${item.done ? "done" : ""}`}
-                          >
-                            <motion.button
-                              whileTap={{ scale: 0.85 }}
-                              className={`check-toggle ${item.done ? "checked" : ""}`}
-                              onClick={() => {
-                                const nextPlan = selectedProject.status.plan.map((p, i) =>
-                                  i === idx ? { ...p, done: !p.done } : p,
-                                );
-                                void saveStatusUpdate(selectedProject, { plan: nextPlan });
-                              }}
-                              aria-label={item.done ? "Mark incomplete" : "Mark complete"}
+                    {selectedProject.status.plan.length > 0 && (
+                      <div>
+                        <div className="insp-section-title">
+                          <span>Next Up</span>
+                          <span className="nav-count">
+                            {selectedProject.status.plan.filter((p) => p.done).length}/
+                            {selectedProject.status.plan.length}
+                          </span>
+                        </div>
+                        <div className="checklist">
+                          {selectedProject.status.plan.map((item, idx) => (
+                            <motion.div
+                              layout
+                              key={`${idx}-${item.text}`}
+                              className={`check-row ${item.done ? "done" : ""}`}
                             >
-                              {item.done && <Check size={11} strokeWidth={3} />}
-                            </motion.button>
-                            <span style={{ flex: 1 }}>{item.text}</span>
-                            <button
-                              className="btn btn-ghost btn-xs"
-                              onClick={() => {
-                                const nextPlan = selectedProject.status.plan.filter((_, i) => i !== idx);
-                                void saveStatusUpdate(selectedProject, { plan: nextPlan });
-                              }}
-                            >
-                              <X size={12} />
-                            </button>
-                          </motion.div>
-                        ))}
-                        <div className="input-inline" style={{ marginTop: 4 }}>
-                          <input
-                            className="text-input"
-                            placeholder="Add a goal..."
-                            value={newPlanText}
-                            onChange={(e) => setNewPlanText(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter" && newPlanText.trim()) {
-                                void saveStatusUpdate(selectedProject, {
-                                  plan: [...selectedProject.status.plan, { text: newPlanText.trim(), done: false }],
-                                });
-                                setNewPlanText("");
-                              }
-                            }}
-                          />
-                          <button
-                            className="btn btn-xs"
-                            onClick={() => {
-                              if (!newPlanText.trim()) return;
-                              void saveStatusUpdate(selectedProject, {
-                                plan: [...selectedProject.status.plan, { text: newPlanText.trim(), done: false }],
-                              });
-                              setNewPlanText("");
-                            }}
-                          >
-                            <Plus size={12} />
-                          </button>
+                              <motion.button
+                                whileTap={{ scale: 0.85 }}
+                                className={`check-toggle ${item.done ? "checked" : ""}`}
+                                onClick={() => {
+                                  const nextPlan = selectedProject.status.plan.map((p, i) =>
+                                    i === idx ? { ...p, done: !p.done } : p,
+                                  );
+                                  void saveStatusUpdate(selectedProject, { plan: nextPlan });
+                                }}
+                                aria-label={item.done ? "Mark incomplete" : "Mark complete"}
+                              >
+                                {item.done && <Check size={11} strokeWidth={3} />}
+                              </motion.button>
+                              <span style={{ flex: 1, lineHeight: 1.4 }}>{cleanText(item.text)}</span>
+                            </motion.div>
+                          ))}
                         </div>
                       </div>
-                    </div>
+                    )}
                   </>
                 )}
 
@@ -1495,6 +1436,13 @@ export function App() {
 
                 {inspectorTab === "settings" && (
                   <>
+                    <div>
+                      <div className="insp-section-title">Location</div>
+                      <div className="inspector-path" style={{ marginTop: 0 }}>
+                        {selectedProject.path}
+                      </div>
+                    </div>
+
                     <div>
                       <div className="insp-section-title">Project Name &amp; Group</div>
                       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
